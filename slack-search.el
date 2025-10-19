@@ -163,9 +163,8 @@ Call CALLBACK with the parsed JSON response."
            (funcall callback response))))
      nil t)))
 
-(defun slack-search--parse-result (match workspace-url)
-  "Parse a single search result MATCH into display format.
-WORKSPACE-URL is the base Slack workspace URL (unused, kept for compatibility)."
+(defun slack-search--parse-result (match)
+  "Parse a single search result MATCH into display format."
   (let* ((username (alist-get 'username match))
          (text (alist-get 'text match))
          (channel (alist-get 'channel match))
@@ -245,12 +244,12 @@ If APPEND is non-nil, append to existing results."
               (erase-buffer)
               (insert (format "#+TITLE: Slack Search Results for: %s\n" slack-search--current-query))
               (insert (format "#+DATE: %s\n\n" (format-time-string "%Y-%m-%d %H:%M:%S")))
-              (insert (format "Total results: %d\n\n" total))))
+              (insert (format "Total results: %d\n\n" (or total 0)))))
           
           (let ((inhibit-read-only t))
             (goto-char (point-max))
             (dolist (match matches)
-              (slack-search--insert-result (slack-search--parse-result match workspace-url))))
+              (slack-search--insert-result (slack-search--parse-result match))))
           
           (setq slack-search--current-page page
                 slack-search--total-pages pages)
