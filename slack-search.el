@@ -166,11 +166,24 @@ Call CALLBACK with the parsed JSON response."
 (defun slack-search--parse-result (match)
   "Parse a single search result MATCH into display format."
   (let* ((username (alist-get 'username match))
+         (user-id (alist-get 'user match))
          (text (alist-get 'text match))
          (channel (alist-get 'channel match))
+         (channel-id (when channel (alist-get 'id channel)))
          (channel-name (if channel
                            (alist-get 'name channel)
                          "unknown"))
+         ;; Determine conversation type
+         (is-channel (when channel (eq (alist-get 'is_channel channel) t)))
+         (is-group (when channel (eq (alist-get 'is_group channel) t)))
+         (is-im (when channel (eq (alist-get 'is_im channel) t)))
+         (is-mpim (when channel (eq (alist-get 'is_mpim channel) t)))
+         (conversation-type (cond
+                             (is-im "DM")
+                             (is-mpim "Group DM")
+                             (is-group "Private Channel")
+                             (is-channel "Channel")
+                             (t "Unknown")))
          (ts (alist-get 'ts match))
          (timestamp (when (and ts (stringp ts))
                       (condition-case nil
@@ -179,10 +192,18 @@ Call CALLBACK with the parsed JSON response."
                         (error "Unknown date"))))
          ;; Use the permalink from the API response directly
          (permalink (alist-get 'permalink match))
+         ;; Extract workspace URL from permalink
+         (workspace-url (when (stringp permalink)
+                          (and (string-match "\\(https://[^/]+\\)" permalink)
+                               (match-string 1 permalink))))
          (thread-ts (alist-get 'thread_ts match))
          (thread-info (if thread-ts "Thread" "")))
     (list :author (if (stringp username) username "Unknown")
+          :user-id (if (stringp user-id) user-id nil)
+          :workspace-url (if (stringp workspace-url) workspace-url nil)
           :channel (if (stringp channel-name) channel-name "unknown")
+          :channel-id (if (stringp channel-id) channel-id nil)
+          :conversation-type conversation-type
           :timestamp (if (stringp timestamp) timestamp "unknown date")
           :permalink (if (stringp permalink) permalink "")
           :thread thread-info
@@ -191,7 +212,11 @@ Call CALLBACK with the parsed JSON response."
 (defun slack-search--insert-result (result)
   "Insert a single RESULT into the current buffer."
   (let* ((author (plist-get result :author))
+         (user-id (plist-get result :user-id))
+         (workspace-url (plist-get result :workspace-url))
          (channel (plist-get result :channel))
+         (channel-id (plist-get result :channel-id))
+         (conversation-type (plist-get result :conversation-type))
          (timestamp (plist-get result :timestamp))
          (permalink (plist-get result :permalink))
          (thread (plist-get result :thread))
@@ -204,10 +229,27 @@ Call CALLBACK with the parsed JSON response."
          (permalink-str (if (stringp permalink)
                             (replace-regexp-in-string "^https:" "slack:" permalink)
                           "slack:#"))
-         (text-str (if (stringp text) text "")))
-    (insert (format "* %s | #%s | [[%s][%s]]\n\n  %s\n\n"
-                    author-str
-                    channel-str
+         (text-str (if (stringp text) text ""))
+         ;; Construct user profile link
+         (author-link (if (and (stringp user-id) (stringp workspace-url))
+                          (format "[[slack://%s/team/%s][%s]]"
+                                  (replace-regexp-in-string "^https://" "" workspace-url)
+                                  user-id
+                                  author-str)
+                        author-str))
+         ;; Construct channel link - use conversation type for non-channels
+         (channel-link (if (and (stringp channel-id) (stringp workspace-url))
+                           (let ((link-text (if (string= conversation-type "Channel")
+                                                (format "#%s" channel-str)
+                                              conversation-type)))
+                             (format "[[slack://%s/archives/%s][%s]]"
+                                     (replace-regexp-in-string "^https://" "" workspace-url)
+                                     channel-id
+                                     link-text))
+                         (format "#%s" channel-str))))
+    (insert (format "* %s | %s | [[%s][%s]]\n\n  %s\n\n"
+                    author-link
+                    channel-link
                     permalink-str
                     timestamp-str
                     text-str))))
@@ -216,20 +258,13 @@ Call CALLBACK with the parsed JSON response."
   "Display search results from RESPONSE in `org-mode' buffer.
 If APPEND is non-nil, append to existing results."
   (let* ((ok (alist-get 'ok response))
-         (query-str (alist-get 'query response))
          (messages-data (alist-get 'messages response))
          (matches (alist-get 'matches messages-data))
          (total (alist-get 'total messages-data))
          (paging (alist-get 'paging messages-data))
          (page (alist-get 'page paging))
-         (pages (alist-get 'pages paging))
-         ;; Extract workspace URL from the first match's permalink if available
-         (first-match (car matches))
-         (permalink-api (when first-match (alist-get 'permalink first-match)))
-         (workspace-url (when permalink-api
-                          (and (string-match "\\(https://[^/]+\\)" permalink-api)
-                               (match-string 1 permalink-api)))))
-    
+         (pages (alist-get 'pages paging)))
+    ;; (message "DEBUG: ok=%s, matches count=%s, total=%s" ok (length matches) total)
     (if (not ok)
         (message "Slack search failed: %s" (alist-get 'error response))
       
@@ -281,7 +316,8 @@ If APPEND is non-nil, append to existing results."
        (lambda (response)
          (setq slack-search--loading nil)
          (slack-search--display-results response t)
-         (message "Loaded page %d of %d" slack-search--current-page slack-search--total-pages))))))
+         ;; (message "Loaded page %d of %d" slack-search--current-page slack-search--total-pages)
+         )))))
 
 ;;; Interactive Commands
 
