@@ -77,7 +77,7 @@ Converts both <url|text> and bare <url> formats."
     (buffer-string)))
 
 (defun slack-mrkdwn-to-org (text)
-  "Convert Slack mrkdwn TEXT to org-mode format.
+  "Convert Slack mrkdwn TEXT to `org-mode' format.
 
 This handles:
 - Code blocks: ```lang\\ncode\\n``` → #+begin_src lang...#+end_src
@@ -88,7 +88,7 @@ This handles:
 Not yet implemented:
 - User mentions: <@USER_ID>
 - Channel mentions: <#CHANNEL_ID>
-- Special formatting (these mostly work as-is in org-mode)
+- Special formatting (these mostly work as-is in `org-mode')
   - Bold: *text*
   - Italic: _text_
   - Strikethrough: ~text~"
