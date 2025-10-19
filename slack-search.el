@@ -24,6 +24,7 @@
 (require 'url)
 (require 'json)
 (require 'org)
+(require 'slack-mrkdwn)
 
 ;;; Customizable Variables
 
@@ -207,7 +208,7 @@ Call CALLBACK with the parsed JSON response."
           :timestamp (if (stringp timestamp) timestamp "unknown date")
           :permalink (if (stringp permalink) permalink "")
           :thread thread-info
-          :text (if (stringp text) text ""))))
+          :text (if (stringp text) (slack-mrkdwn-to-org text) ""))))
 
 (defun slack-search--insert-result (result)
   "Insert a single RESULT into the current buffer."
