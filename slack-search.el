@@ -54,6 +54,27 @@ Should return a string containing the `d' cookie value."
   :type 'integer
   :group 'slack-search)
 
+(defcustom slack-search-inhibit-redirect-browser-tab t
+  "Whether to close the redirect browser tab after opening Slack link.
+When non-nil, automatically close the browser tab that Slack opens
+for redirection after the link opens in the Slack app.  This prevents
+lingering useless tabs in your browser.  Only works on macOS."
+  :type 'boolean
+  :group 'slack-search)
+
+(defcustom slack-search-browser-name "Brave Browser"
+  "Name of the browser application to close tabs in.
+Common values: \"Brave Browser\", \"Google Chrome\", \"Safari\".
+Only used when `slack-search-inhibit-redirect-browser-tab' is non-nil."
+  :type 'string
+  :group 'slack-search)
+
+(defcustom slack-search-close-tab-delay 0.5
+  "Delay in seconds before closing the browser tab after opening Slack link.
+Only used when `slack-search-inhibit-redirect-browser-tab' is non-nil."
+  :type 'number
+  :group 'slack-search)
+
 ;;; Internal Variables
 
 (defvar slack-search--current-query nil
@@ -67,6 +88,28 @@ Should return a string containing the `d' cookie value."
 
 (defvar slack-search--loading nil
   "Flag indicating if a search is currently loading.")
+
+;;; Org-mode Link Handler
+
+(defun slack-search--follow-link (path)
+  "Open Slack link from PATH and close browser tab.
+PATH should be the part after slack:// prefix."
+  (let ((url (concat "https:" path)))
+    ;; Open the URL (which will redirect to Slack app)
+    (browse-url url)
+    ;; Close the browser tab after a delay (macOS only)
+    (when (and slack-search-inhibit-redirect-browser-tab
+               (eq system-type 'darwin))
+      (run-at-time slack-search-close-tab-delay nil
+                   (lambda ()
+                     (let ((jxa-script (format "Application('%s').windows[0].activeTab.close(); Application('Slack').activate();"
+                                               slack-search-browser-name)))
+                       (shell-command (format "osascript -l JavaScript -e \"%s\"" jxa-script))))))))
+
+;; Register the slack:// link type with org-mode
+(org-link-set-parameters
+ "slack"
+ :follow #'slack-search--follow-link)
 
 ;;; Helper Functions
 
@@ -158,7 +201,10 @@ WORKSPACE-URL is the base Slack workspace URL (unused, kept for compatibility)."
          (author-str (if (stringp author) author "Unknown"))
          (channel-str (if (stringp channel) channel "unknown"))
          (timestamp-str (if (stringp timestamp) timestamp "unknown date"))
-         (permalink-str (if (stringp permalink) permalink "#"))
+         ;; Convert https:// to slack:// for custom link handler
+         (permalink-str (if (stringp permalink)
+                            (replace-regexp-in-string "^https:" "slack:" permalink)
+                          "slack:#"))
          (text-str (if (stringp text) text "")))
     (insert (format "* %s | #%s | [[%s][%s]]\n\n  %s\n\n"
                     author-str
@@ -168,7 +214,7 @@ WORKSPACE-URL is the base Slack workspace URL (unused, kept for compatibility)."
                     text-str))))
 
 (defun slack-search--display-results (response &optional append)
-  "Display search results from RESPONSE in 'org-mode' buffer.
+  "Display search results from RESPONSE in `org-mode' buffer.
 If APPEND is non-nil, append to existing results."
   (let* ((ok (alist-get 'ok response))
          (query-str (alist-get 'query response))
@@ -229,7 +275,7 @@ If APPEND is non-nil, append to existing results."
   (unless slack-search--loading
     (setq slack-search--loading t)
     (let ((next-page (1+ slack-search--current-page)))
-      (message "Loading page %d of %d..." next-page slack-search--total-pages)
+      ;; (message "Loading page %d of %d..." next-page slack-search--total-pages)
       (slack-search--make-request
        slack-search--current-query
        next-page
@@ -243,13 +289,13 @@ If APPEND is non-nil, append to existing results."
 ;;;###autoload
 (defun slack-search (query)
   "Search Slack messages for QUERY.
-Display results in an 'org-mode' buffer with pagination."
+Display results in an `org-mode' buffer with pagination."
   (interactive "sSearch Slack: ")
   (setq slack-search--current-query query
         slack-search--current-page 1
         slack-search--total-pages nil
         slack-search--loading nil)
-  (message "Searching Slack for: %s" query)
+  ;; (message "Searching Slack for: %s" query)
   (slack-search--make-request
    query
    1
