@@ -36,15 +36,18 @@ Handles blocks with or without language identifiers."
     ;; Match ``` followed by optional lang (only if followed by newline), then code, then ```
     ;; Two patterns: ```lang\ncode``` or ```code```
     (while (re-search-forward "```\\(?:\\([a-zA-Z0-9]+\\)\n\\)?\\(\\(?:.\\|\n\\)*?\\)```" nil t)
-      (let* ((lang (match-string 1))  ; Only captured if followed by newline
-             (code (match-string 2))
+      (let* ((match-start (match-beginning 0))
+             (match-end (match-end 0))
+             (lang (match-string-no-properties 1))  ; Only captured if followed by newline
+             (code (match-string-no-properties 2))
              ;; Trim leading/trailing whitespace from code
-             (trimmed-code (string-trim code)))
-        (replace-match
-         (format "#+begin_src %s\n%s\n#+end_src"
-                 (if (or (null lang) (string-empty-p lang)) "" lang)
-                 trimmed-code)
-         t t)))
+             (trimmed-code (string-trim code))
+             (replacement (if (and lang (not (string-empty-p lang)))
+                              (format "#+begin_src %s\n%s\n#+end_src" lang trimmed-code)
+                            (format "#+begin_src\n%s\n#+end_src" trimmed-code))))
+        (delete-region match-start match-end)
+        (goto-char match-start)
+        (insert replacement)))
     (buffer-string)))
 
 (defun slack-mrkdwn--convert-inline-code (text)
