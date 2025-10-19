@@ -1,4 +1,4 @@
-;;; slack-search.el Search in Slack -*- lexical-binding: t; -*-
+;;; slack-search.el --- Search in Slack -*- lexical-binding: t; -*-
 ;;
 ;; Copyright (C) 2025 Ag Ibragimov
 ;;
@@ -40,7 +40,7 @@ Should return a string containing the Bearer token."
 
 (defcustom slack-search-cookie-function nil
   "Function that returns the Slack cookie.
-Should return a string containing the 'd' cookie value."
+Should return a string containing the `d' cookie value."
   :type 'function
   :group 'slack-search)
 
@@ -76,13 +76,13 @@ Should return a string containing the 'd' cookie value."
   "Get the Slack API token."
   (if slack-search-token-function
       (funcall slack-search-token-function)
-    (error "slack-search-token-function is not set")))
+    (error "`slack-search-token-function` is not set")))
 
 (defun slack-search--get-cookie ()
   "Get the Slack cookie."
   (if slack-search-cookie-function
       (funcall slack-search-cookie-function)
-    (error "slack-search-cookie-function is not set")))
+    (error "`slack-search-cookie-function` is not set")))
 
 (defun slack-search--make-request (query page callback)
   "Send a search request to Slack API for QUERY at PAGE.
@@ -134,7 +134,7 @@ WORKSPACE-URL is the base Slack workspace URL (unused, kept for compatibility)."
                      (condition-case nil
                          (format-time-string "%b %d at %I:%M %p"
                                            (seconds-to-time (string-to-number ts)))
-                       (error "unknown date"))))
+                       (error "Unknown date"))))
          ;; Use the permalink from the API response directly
          (permalink (alist-get 'permalink match))
          (thread-ts (alist-get 'thread_ts match))
@@ -169,7 +169,7 @@ WORKSPACE-URL is the base Slack workspace URL (unused, kept for compatibility)."
                     text-str))))
 
 (defun slack-search--display-results (response &optional append)
-  "Display search results from RESPONSE in org-mode buffer.
+  "Display search results from RESPONSE in 'org-mode' buffer.
 If APPEND is non-nil, append to existing results."
   (let* ((ok (alist-get 'ok response))
          (query-str (alist-get 'query response))
@@ -194,9 +194,9 @@ If APPEND is non-nil, append to existing results."
       
       (with-current-buffer (get-buffer-create slack-search-buffer-name)
         (let ((saved-point (when append (point)))
-              (saved-window-start (when append 
-                                   (and (get-buffer-window (current-buffer))
-                                        (window-start (get-buffer-window (current-buffer)))))))
+              (saved-window-start (when append
+                                    (and (get-buffer-window (current-buffer))
+                                         (window-start (get-buffer-window (current-buffer)))))))
           
           (unless append
             (let ((inhibit-read-only t))
@@ -218,7 +218,7 @@ If APPEND is non-nil, append to existing results."
           (if append
               (progn
                 (when saved-point (goto-char saved-point))
-                (when saved-window-start 
+                (when saved-window-start
                   (set-window-start (get-buffer-window (current-buffer)) saved-window-start)))
             (switch-to-buffer (current-buffer))
             (goto-char (point-min))
@@ -247,7 +247,7 @@ If APPEND is non-nil, append to existing results."
 ;;;###autoload
 (defun slack-search (query)
   "Search Slack messages for QUERY.
-Display results in an org-mode buffer with pagination."
+Display results in an 'org-mode' buffer with pagination."
   (interactive "sSearch Slack: ")
   (setq slack-search--current-query query
         slack-search--current-page 1
