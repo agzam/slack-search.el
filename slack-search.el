@@ -70,23 +70,7 @@ Should return a string containing the 'd' cookie value."
 
 ;;; Helper Functions
 
-(defun slack-search--open-in-slack-app (&optional url)
-  "Open Slack URL in the Slack app instead of browser.
-If URL is not provided, get the link at point."
-  (interactive)
-  (let* ((link-url (or url
-                      ;; Get URL at point if called interactively
-                      (org-element-property :raw-link (org-element-context))))
-         (slack-url (when link-url
-                     (replace-regexp-in-string "^https://\\([^.]+\\)\\.slack\\.com" "slack://\\1" link-url))))
-    (if slack-url
-        (start-process "open-slack" nil "open" slack-url)
-      (message "No Slack link found at point"))))
 
-(defun slack-search--follow-link (path &rest _)
-  "Follow a Slack link by opening it in the Slack app.
-PATH is the URL without the 'slack:' prefix."
-  (slack-search--open-in-slack-app (concat "https:" path)))
 
 (defun slack-search--get-token ()
   "Get the Slack API token."
@@ -138,30 +122,24 @@ Call CALLBACK with the parsed JSON response."
 
 (defun slack-search--parse-result (match workspace-url)
   "Parse a single search result MATCH into display format.
-WORKSPACE-URL is the base Slack workspace URL."
+WORKSPACE-URL is the base Slack workspace URL (unused, kept for compatibility)."
   (let* ((username (alist-get 'username match))
          (text (alist-get 'text match))
-         (team (alist-get 'team match))
          (channel (alist-get 'channel match))
-         (channel-id (if channel (alist-get 'id channel) ""))
          (channel-name (if channel
                           (alist-get 'name channel)
                         "unknown"))
          (ts (alist-get 'ts match))
-         ;; Convert timestamp like "1760111619.833349" to message ID "p1760111619833349"
-         (message-id (when (and ts (stringp ts))
-                      (concat "p" (replace-regexp-in-string "\\." "" ts))))
          (timestamp (when (and ts (stringp ts))
                      (condition-case nil
                          (format-time-string "%b %d at %I:%M %p"
                                            (seconds-to-time (string-to-number ts)))
                        (error "unknown date"))))
-         (permalink (when (and workspace-url (stringp workspace-url) 
-                              channel-id (stringp channel-id) 
-                              message-id (stringp message-id))
-                     (format "%s/archives/%s/%s" workspace-url channel-id message-id)))
+         ;; Use the permalink from the API response directly
+         (permalink (alist-get 'permalink match))
          (thread-ts (alist-get 'thread_ts match))
          (thread-info (if thread-ts "Thread" "")))
+    (message "DEBUG parse: permalink from API=%S" permalink)
     (list :author (if (stringp username) username "Unknown")
           :channel (if (stringp channel-name) channel-name "unknown")
           :timestamp (if (stringp timestamp) timestamp "unknown date")
@@ -171,18 +149,24 @@ WORKSPACE-URL is the base Slack workspace URL."
 
 (defun slack-search--insert-result (result)
   "Insert a single RESULT into the current buffer."
-  (let ((author (plist-get result :author))
-        (channel (plist-get result :channel))
-        (timestamp (plist-get result :timestamp))
-        (permalink (plist-get result :permalink))
-        (thread (plist-get result :thread))
-        (text (plist-get result :text)))
+  (let* ((author (plist-get result :author))
+         (channel (plist-get result :channel))
+         (timestamp (plist-get result :timestamp))
+         (permalink (plist-get result :permalink))
+         (thread (plist-get result :thread))
+         (text (plist-get result :text))
+         ;; Ensure all values are strings
+         (author-str (if (stringp author) author "Unknown"))
+         (channel-str (if (stringp channel) channel "unknown"))
+         (timestamp-str (if (stringp timestamp) timestamp "unknown date"))
+         (permalink-str (if (stringp permalink) permalink "#"))
+         (text-str (if (stringp text) text "")))
     (insert (format "* %s | #%s | [[%s][%s]]\n\n  %s\n\n"
-                    (or author "Unknown")
-                    (or channel "unknown")
-                    (or permalink "#")
-                    (or timestamp "unknown date")
-                    (or text "")))))
+                    author-str
+                    channel-str
+                    permalink-str
+                    timestamp-str
+                    text-str))))
 
 (defun slack-search--display-results (response &optional append)
   "Display search results from RESPONSE in org-mode buffer.
@@ -209,32 +193,40 @@ If APPEND is non-nil, append to existing results."
         (message "Slack search failed: %s" (alist-get 'error response))
       
       (with-current-buffer (get-buffer-create slack-search-buffer-name)
-        (unless append
+        (let ((saved-point (when append (point)))
+              (saved-window-start (when append 
+                                   (and (get-buffer-window (current-buffer))
+                                        (window-start (get-buffer-window (current-buffer)))))))
+          
+          (unless append
+            (let ((inhibit-read-only t))
+              (erase-buffer)
+              (org-mode)
+              (insert (format "#+TITLE: Slack Search Results for: %s\n" slack-search--current-query))
+              (insert (format "#+DATE: %s\n\n" (format-time-string "%Y-%m-%d %H:%M:%S")))
+              (insert (format "Total results: %d\n\n" total))))
+          
           (let ((inhibit-read-only t))
-            (erase-buffer)
-            (org-mode)
-            ;; Bind RET to open link in Slack app
-            (local-set-key (kbd "RET") 'slack-search--open-in-slack-app)
-            (insert (format "#+TITLE: Slack Search Results for: %s\n" slack-search--current-query))
-            (insert (format "#+DATE: %s\n\n" (format-time-string "%Y-%m-%d %H:%M:%S")))
-            (insert (format "Total results: %d\n\n" total))))
-        
-        (let ((inhibit-read-only t))
-          (goto-char (point-max))
-          (dolist (match matches)
-            (slack-search--insert-result (slack-search--parse-result match workspace-url))))
-        
-        (setq slack-search--current-page page
-              slack-search--total-pages pages)
-        
-        (if append
             (goto-char (point-max))
-          (switch-to-buffer (current-buffer))
-          (goto-char (point-min)))
-        
-        ;; Load next page if available
-        (when (< page pages)
-          (slack-search--load-next-page))))))
+            (dolist (match matches)
+              (slack-search--insert-result (slack-search--parse-result match workspace-url))))
+          
+          (setq slack-search--current-page page
+                slack-search--total-pages pages)
+          
+          ;; Restore position when appending, otherwise go to top
+          (if append
+              (progn
+                (when saved-point (goto-char saved-point))
+                (when saved-window-start 
+                  (set-window-start (get-buffer-window (current-buffer)) saved-window-start)))
+            (switch-to-buffer (current-buffer))
+            (goto-char (point-min))
+            (set-window-start (selected-window) (point-min)))
+          
+          ;; Load next page if available
+          (when (< page pages)
+            (slack-search--load-next-page)))))))
 
 (defun slack-search--load-next-page ()
   "Load the next page of search results asynchronously."
