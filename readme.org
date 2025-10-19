@@ -1,10 +1,13 @@
 #+TITLE: slack-search
 #+AUTHOR: Ag Ibragimov
 #+DATE: 2025
+[[https://github.com/agzam/slack-search.el/actions/workflows/run-tests.yml][https://github.com/agzam/slack-search.el/actions/workflows/run-tests.yml/badge.svg]]
 
-[[https://github.com/agzam/slack-search/actions/workflows/run-tests.yml][https://github.com/agzam/slack-search/actions/workflows/run-tests.yml/badge.svg]]
+Search Slack messages from Emacs and view results in org-mode buffer.
 
-Search Slack messages from Emacs and view results as org-mode documents with clickable links.
+[[file:./test/preview.gif]]
+
+Status: fresh out of oven - very experimental, expect weirdness!
 
 * Why?
 
