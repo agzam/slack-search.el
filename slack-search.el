@@ -103,8 +103,8 @@ Call CALLBACK with the parsed JSON response."
          ;; Prevent url-retrieve from adding cookies automatically
          (url-cookie-storage nil)
          (url-cookie-secure-storage nil))
-    (message "Request URL: %s" url)
-    (message "Headers: %S" url-request-extra-headers)
+    ;; (message "Request URL: %s" url)
+    ;; (message "Headers: %S" url-request-extra-headers)
     (url-retrieve
      url
      (lambda (status)
@@ -116,7 +116,7 @@ Call CALLBACK with the parsed JSON response."
                 (json-array-type 'list)
                 (json-key-type 'symbol)
                 (response (json-read)))
-           (message "Response: %S" response)
+           ;; (message "Response: %S" response)
            (funcall callback response))))
      nil t)))
 
@@ -127,19 +127,18 @@ WORKSPACE-URL is the base Slack workspace URL (unused, kept for compatibility)."
          (text (alist-get 'text match))
          (channel (alist-get 'channel match))
          (channel-name (if channel
-                          (alist-get 'name channel)
-                        "unknown"))
+                           (alist-get 'name channel)
+                         "unknown"))
          (ts (alist-get 'ts match))
          (timestamp (when (and ts (stringp ts))
-                     (condition-case nil
-                         (format-time-string "%b %d at %I:%M %p"
-                                           (seconds-to-time (string-to-number ts)))
-                       (error "Unknown date"))))
+                      (condition-case nil
+                          (format-time-string "%b %d at %I:%M %p"
+                                              (seconds-to-time (string-to-number ts)))
+                        (error "Unknown date"))))
          ;; Use the permalink from the API response directly
          (permalink (alist-get 'permalink match))
          (thread-ts (alist-get 'thread_ts match))
          (thread-info (if thread-ts "Thread" "")))
-    (message "DEBUG parse: permalink from API=%S" permalink)
     (list :author (if (stringp username) username "Unknown")
           :channel (if (stringp channel-name) channel-name "unknown")
           :timestamp (if (stringp timestamp) timestamp "unknown date")
@@ -183,11 +182,8 @@ If APPEND is non-nil, append to existing results."
          (first-match (car matches))
          (permalink-api (when first-match (alist-get 'permalink first-match)))
          (workspace-url (when permalink-api
-                         (and (string-match "\\(https://[^/]+\\)" permalink-api)
-                              (match-string 1 permalink-api)))))
-    
-    (message "Workspace URL: %S" workspace-url)
-    (message "First match permalink: %S" permalink-api)
+                          (and (string-match "\\(https://[^/]+\\)" permalink-api)
+                               (match-string 1 permalink-api)))))
     
     (if (not ok)
         (message "Slack search failed: %s" (alist-get 'error response))
@@ -201,7 +197,6 @@ If APPEND is non-nil, append to existing results."
           (unless append
             (let ((inhibit-read-only t))
               (erase-buffer)
-              (org-mode)
               (insert (format "#+TITLE: Slack Search Results for: %s\n" slack-search--current-query))
               (insert (format "#+DATE: %s\n\n" (format-time-string "%Y-%m-%d %H:%M:%S")))
               (insert (format "Total results: %d\n\n" total))))
@@ -220,6 +215,7 @@ If APPEND is non-nil, append to existing results."
                 (when saved-point (goto-char saved-point))
                 (when saved-window-start
                   (set-window-start (get-buffer-window (current-buffer)) saved-window-start)))
+            (org-mode)
             (switch-to-buffer (current-buffer))
             (goto-char (point-min))
             (set-window-start (selected-window) (point-min)))
