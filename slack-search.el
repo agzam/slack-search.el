@@ -169,6 +169,7 @@ Call CALLBACK with the parsed JSON response."
   (let* ((username (alist-get 'username match))
          (user-id (alist-get 'user match))
          (text (alist-get 'text match))
+         (attachments (alist-get 'attachments match))
          (channel (alist-get 'channel match))
          (channel-id (when channel (alist-get 'id channel)))
          (channel-name (if channel
@@ -198,7 +199,23 @@ Call CALLBACK with the parsed JSON response."
                           (and (string-match "\\(https://[^/]+\\)" permalink)
                                (match-string 1 permalink))))
          (thread-ts (alist-get 'thread_ts match))
-         (thread-info (if thread-ts "Thread" "")))
+         (thread-info (if thread-ts "Thread" ""))
+         ;; Handle attachments (e.g., shared messages from other channels)
+         (attachment-info (when (and attachments (listp attachments))
+                            (let ((first-attach (car attachments)))
+                              (when first-attach
+                                (list :is-share (alist-get 'is_share first-attach)
+                                      :author-name (alist-get 'author_name first-attach)
+                                      :author-id (alist-get 'author_id first-attach)
+                                      :channel-id (alist-get 'channel_id first-attach)
+                                      :from-url (alist-get 'from_url first-attach)
+                                      :attach-text (or (alist-get 'text first-attach)
+                                                      (alist-get 'fallback first-attach)))))))
+         ;; Get text content: prefer main text, fall back to attachment text
+         (content-text (if (and (stringp text) (not (string-empty-p text)))
+                           text
+                         (when attachment-info
+                           (plist-get attachment-info :attach-text)))))
     (list :author (if (stringp username) username "Unknown")
           :user-id (if (stringp user-id) user-id nil)
           :workspace-url (if (stringp workspace-url) workspace-url nil)
@@ -208,7 +225,8 @@ Call CALLBACK with the parsed JSON response."
           :timestamp (if (stringp timestamp) timestamp "unknown date")
           :permalink (if (stringp permalink) permalink "")
           :thread thread-info
-          :text (if (stringp text) (slack-mrkdwn-to-org text) ""))))
+          :text (if (stringp content-text) (slack-mrkdwn-to-org content-text) "")
+          :attachment-info attachment-info)))
 
 (defun slack-search--insert-result (result)
   "Insert a single RESULT into the current buffer."
@@ -222,6 +240,7 @@ Call CALLBACK with the parsed JSON response."
          (permalink (plist-get result :permalink))
          (thread (plist-get result :thread))
          (text (plist-get result :text))
+         (attachment-info (plist-get result :attachment-info))
          ;; Ensure all values are strings
          (author-str (if (stringp author) author "Unknown"))
          (channel-str (if (stringp channel) channel "unknown"))
@@ -247,13 +266,60 @@ Call CALLBACK with the parsed JSON response."
                                      (replace-regexp-in-string "^https://" "" workspace-url)
                                      channel-id
                                      link-text))
-                         (format "#%s" channel-str))))
-    (insert (format "* %s | %s | [[%s][%s]]\n\n  %s\n\n"
-                    author-link
-                    channel-link
-                    permalink-str
-                    timestamp-str
-                    text-str))))
+                         (format "#%s" channel-str)))
+         ;; Handle shared message info
+         (is-shared (and attachment-info (plist-get attachment-info :is-share)))
+         (share-metadata (when is-shared
+                           (let* ((orig-author (plist-get attachment-info :author-name))
+                                  (orig-author-id (plist-get attachment-info :author-id))
+                                  (orig-channel-id (plist-get attachment-info :channel-id))
+                                  (orig-url (plist-get attachment-info :from-url)))
+                             ;; Extract timestamp from the from-url
+                             ;; URL format: https://workspace.slack.com/archives/CHANNEL_ID/pTIMESTAMP
+                             (when (and orig-url (string-match "/archives/\\([^/]+\\)/p\\([0-9]+\\)" orig-url))
+                               (let* ((orig-ts (match-string 2 orig-url))
+                                      (orig-timestamp (when orig-ts
+                                                       (condition-case nil
+                                                           (format-time-string "%b %d at %I:%M %p"
+                                                                             (seconds-to-time (string-to-number (substring orig-ts 0 10))))
+                                                         (error nil))))
+                                      ;; Build author link
+                                      (orig-author-link (if (and orig-author-id workspace-url)
+                                                           (format "[[slack://%s/team/%s][%s]]"
+                                                                   (replace-regexp-in-string "^https://" "" workspace-url)
+                                                                   orig-author-id
+                                                                   (or orig-author "Unknown"))
+                                                         (or orig-author "Unknown")))
+                                      ;; Build channel link
+                                      (orig-channel-link (if (and orig-channel-id workspace-url)
+                                                            (format "[[slack://%s/archives/%s][#%s]]"
+                                                                    (replace-regexp-in-string "^https://" "" workspace-url)
+                                                                    orig-channel-id
+                                                                    orig-channel-id)
+                                                          "#unknown")))
+                                 (format "** /Shared from %s | Posted in %s | [[%s][%s]]/\n"
+                                         orig-author-link
+                                         orig-channel-link
+                                         (replace-regexp-in-string "^https:" "slack:" orig-url)
+                                         (or orig-timestamp "unknown date"))))))))
+    (if is-shared
+        ;; For shared messages, use a subheading with the shared metadata
+        (insert (format "* %s | %s | [[%s][%s]]\n\n%s\n%s\n"
+                        author-link
+                        channel-link
+                        permalink-str
+                        timestamp-str
+                        share-metadata
+                        (if (not (string-empty-p text-str))
+                            text-str
+                          "")))
+      ;; For regular messages, use standard format
+      (insert (format "* %s | %s | [[%s][%s]]\n\n%s\n\n"
+                      author-link
+                      channel-link
+                      permalink-str
+                      timestamp-str
+                      text-str)))))
 
 (defun slack-search--display-results (response &optional append)
   "Display search results from RESPONSE in `org-mode' buffer.
@@ -285,7 +351,10 @@ If APPEND is non-nil, append to existing results."
           (let ((inhibit-read-only t))
             (goto-char (point-max))
             (dolist (match matches)
-              (slack-search--insert-result (slack-search--parse-result match))))
+              (slack-search--insert-result (slack-search--parse-result match)))
+            
+            ;; Indent the entire buffer properly
+            (indent-region (point-min) (point-max)))
           
           (setq slack-search--current-page page
                 slack-search--total-pages pages)
@@ -297,12 +366,13 @@ If APPEND is non-nil, append to existing results."
                 (when saved-window-start
                   (set-window-start (get-buffer-window (current-buffer)) saved-window-start)))
             (org-mode)
-            (switch-to-buffer (current-buffer))
             (goto-char (point-min))
+            (switch-to-buffer (current-buffer))
             (set-window-start (selected-window) (point-min)))
           
-          ;; Load next page if available
-          (when (< page pages)
+          ;; Load next page if available, but only after appending results
+          ;; For the first page, don't auto-load to avoid race conditions
+          (when (and append (< page pages))
             (slack-search--load-next-page)))))))
 
 (defun slack-search--load-next-page ()
