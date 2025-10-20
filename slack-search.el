@@ -215,7 +215,16 @@ Call CALLBACK with the parsed JSON response."
          (content-text (if (and (stringp text) (not (string-empty-p text)))
                            text
                          (when attachment-info
-                           (plist-get attachment-info :attach-text)))))
+                           (plist-get attachment-info :attach-text))))
+         ;; Handle files
+         (files (alist-get 'files match))
+         (files-info (when (and files (listp files))
+                       (mapcar (lambda (file)
+                                 (list :name (alist-get 'name file)
+                                       :permalink (alist-get 'permalink file)
+                                       :size (alist-get 'size file)
+                                       :pretty-type (alist-get 'pretty_type file)))
+                               files))))
     (list :author (if (stringp username) username "Unknown")
           :user-id (if (stringp user-id) user-id nil)
           :workspace-url (if (stringp workspace-url) workspace-url nil)
@@ -226,7 +235,8 @@ Call CALLBACK with the parsed JSON response."
           :permalink (if (stringp permalink) permalink "")
           :thread thread-info
           :text (if (stringp content-text) (slack-mrkdwn-to-org content-text) "")
-          :attachment-info attachment-info)))
+          :attachment-info attachment-info
+          :files files-info)))
 
 (defun slack-search--insert-result (result)
   "Insert a single RESULT into the current buffer."
@@ -241,6 +251,7 @@ Call CALLBACK with the parsed JSON response."
          (thread (plist-get result :thread))
          (text (plist-get result :text))
          (attachment-info (plist-get result :attachment-info))
+         (files (plist-get result :files))
          ;; Ensure all values are strings
          (author-str (if (stringp author) author "Unknown"))
          (channel-str (if (stringp channel) channel "unknown"))
@@ -279,32 +290,55 @@ Call CALLBACK with the parsed JSON response."
                              (when (and orig-url (string-match "/archives/\\([^/]+\\)/p\\([0-9]+\\)" orig-url))
                                (let* ((orig-ts (match-string 2 orig-url))
                                       (orig-timestamp (when orig-ts
-                                                       (condition-case nil
-                                                           (format-time-string "%b %d at %I:%M %p"
-                                                                             (seconds-to-time (string-to-number (substring orig-ts 0 10))))
-                                                         (error nil))))
+                                                        (condition-case nil
+                                                            (format-time-string "%b %d at %I:%M %p"
+                                                                                (seconds-to-time (string-to-number (substring orig-ts 0 10))))
+                                                          (error nil))))
                                       ;; Build author link
                                       (orig-author-link (if (and orig-author-id workspace-url)
-                                                           (format "[[slack://%s/team/%s][%s]]"
-                                                                   (replace-regexp-in-string "^https://" "" workspace-url)
-                                                                   orig-author-id
-                                                                   (or orig-author "Unknown"))
-                                                         (or orig-author "Unknown")))
+                                                            (format "[[slack://%s/team/%s][%s]]"
+                                                                    (replace-regexp-in-string "^https://" "" workspace-url)
+                                                                    orig-author-id
+                                                                    (or orig-author "Unknown"))
+                                                          (or orig-author "Unknown")))
                                       ;; Build channel link
                                       (orig-channel-link (if (and orig-channel-id workspace-url)
-                                                            (format "[[slack://%s/archives/%s][#%s]]"
-                                                                    (replace-regexp-in-string "^https://" "" workspace-url)
-                                                                    orig-channel-id
-                                                                    orig-channel-id)
-                                                          "#unknown")))
+                                                             (format "[[slack://%s/archives/%s][#%s]]"
+                                                                     (replace-regexp-in-string "^https://" "" workspace-url)
+                                                                     orig-channel-id
+                                                                     orig-channel-id)
+                                                           "#unknown")))
                                  (format "** /Shared from %s | Posted in %s | [[%s][%s]]/\n"
                                          orig-author-link
                                          orig-channel-link
                                          (replace-regexp-in-string "^https:" "slack:" orig-url)
-                                         (or orig-timestamp "unknown date"))))))))
+                                         (or orig-timestamp "unknown date")))))))
+         ;; Format files list
+         (files-str (when files
+                      (concat "\n"
+                              (mapconcat
+                               (lambda (file)
+                                 (let* ((name (plist-get file :name))
+                                        (permalink (plist-get file :permalink))
+                                        (size (plist-get file :size))
+                                        (type (plist-get file :pretty-type))
+                                        ;; Convert bytes to human-readable format
+                                        (size-str (cond
+                                                   ((not size) "")
+                                                   ((< size 1024) (format "%d B" size))
+                                                   ((< size (* 1024 1024)) (format "%.1f KB" (/ size 1024.0)))
+                                                   (t (format "%.1f MB" (/ size 1024.0 1024.0))))))
+                                   (format "- [[%s][%s]] (%s%s)"
+                                           permalink
+                                           name
+                                           size-str
+                                           (if type (format ", %s" type) ""))))
+                               files
+                               "\n")
+                              "\n"))))
     (if is-shared
         ;; For shared messages, use a subheading with the shared metadata
-        (insert (format "* %s | %s | [[%s][%s]]\n\n%s\n%s\n"
+        (insert (format "* %s | %s | [[%s][%s]]\n\n%s\n%s%s\n"
                         author-link
                         channel-link
                         permalink-str
@@ -312,14 +346,16 @@ Call CALLBACK with the parsed JSON response."
                         share-metadata
                         (if (not (string-empty-p text-str))
                             text-str
-                          "")))
+                          "")
+                        (or files-str "")))
       ;; For regular messages, use standard format
-      (insert (format "* %s | %s | [[%s][%s]]\n\n%s\n\n"
+      (insert (format "* %s | %s | [[%s][%s]]\n\n%s%s\n"
                       author-link
                       channel-link
                       permalink-str
                       timestamp-str
-                      text-str)))))
+                      text-str
+                      (or files-str ""))))))
 
 (defun slack-search--display-results (response &optional append)
   "Display search results from RESPONSE in `org-mode' buffer.
