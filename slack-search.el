@@ -335,7 +335,8 @@ If APPEND is non-nil, append to existing results."
     (if (not ok)
         (message "Slack search failed: %s" (alist-get 'error response))
       
-      (with-current-buffer (get-buffer-create slack-search-buffer-name)
+      (let ((buffer (get-buffer-create slack-search-buffer-name)))
+        (with-current-buffer buffer
         (let ((saved-point (when append (point)))
               (saved-window-start (when append
                                     (and (get-buffer-window (current-buffer))
@@ -359,21 +360,25 @@ If APPEND is non-nil, append to existing results."
           (setq slack-search--current-page page
                 slack-search--total-pages pages)
           
-          ;; Restore position when appending, otherwise go to top
+          ;; Restore position when appending, otherwise set up the buffer
           (if append
               (progn
                 (when saved-point (goto-char saved-point))
                 (when saved-window-start
                   (set-window-start (get-buffer-window (current-buffer)) saved-window-start)))
-            (org-mode)
-            (goto-char (point-min))
-            (switch-to-buffer (current-buffer))
-            (set-window-start (selected-window) (point-min)))
+            (unless (eq major-mode 'slack-search-mode)
+              (slack-search-mode))
+            (goto-char (point-min)))
           
           ;; Load next page if available, but only after appending results
           ;; For the first page, don't auto-load to avoid race conditions
           (when (and append (< page pages))
-            (slack-search--load-next-page)))))))
+            (slack-search--load-next-page))))
+        
+        ;; Switch to buffer AFTER all processing is complete
+        (unless append
+          (switch-to-buffer buffer)
+          (set-window-start (selected-window) (point-min)))))))
 
 (defun slack-search--load-next-page ()
   "Load the next page of search results asynchronously."
@@ -389,6 +394,31 @@ If APPEND is non-nil, append to existing results."
          (slack-search--display-results response t)
          ;; (message "Loaded page %d of %d" slack-search--current-page slack-search--total-pages)
          )))))
+
+;;; Major Mode
+
+(defvar slack-search-mode-map
+  (let ((map (make-sparse-keymap)))
+    ;; Inherit from org-mode-map
+    (set-keymap-parent map org-mode-map)
+    ;; Add custom keybindings here if needed
+    ;; (define-key map (kbd "C-c C-n") #'slack-search-next-result)
+    ;; (define-key map (kbd "C-c C-p") #'slack-search-previous-result)
+    map)
+  "Keymap for `slack-search-mode'.")
+
+(define-derived-mode slack-search-mode org-mode "Slack-Search"
+  "Major mode for displaying Slack search results.
+
+This mode is derived from `org-mode' and displays search results
+from Slack in an organized, readable format. Each result includes
+author, channel, timestamp, and message content with proper formatting.
+
+\\{slack-search-mode-map}"
+  ;; Set buffer to read-only by default
+  (setq buffer-read-only t)
+  ;; Add any additional mode-specific setup here
+  )
 
 ;;; Interactive Commands
 
