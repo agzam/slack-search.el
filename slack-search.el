@@ -5,8 +5,8 @@
 ;; Author: Ag Ibragimov <agzam.ibragimov@gmail.com>
 ;; Maintainer: Ag Ibragimov <agzam.ibragimov@gmail.com>
 ;; Created: October 18, 2025
-;; Modified: October 18, 2025
-;; Version: 0.0.1
+;; Modified: January 20, 2025
+;; Version: 0.0.2
 ;; Keywords: tools
 ;; Homepage: https://github.com/agzam/slack-search
 ;; Package-Requires: ((emacs "30.2"))

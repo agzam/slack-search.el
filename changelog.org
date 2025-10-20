@@ -1,0 +1,35 @@
+#+TITLE: Changelog
+#+AUTHOR: Ag Ibragimov
+
+All notable changes to this project will be documented in this file.
+
+* [0.0.2] - 2025-01-20
+
+** Added
+- Major mode ~slack-search-mode~ derived from ~org-mode~ with custom keymap and hook support
+- File attachments display with clickable links, human-readable sizes, and file types
+- Support for shared messages from other channels with proper metadata display
+- Shared messages show as subheadings with italicized metadata line including author, channel, and timestamp links
+
+** Fixed
+- Race condition that caused empty results on first search attempt
+- Pagination logic to prevent auto-loading next page on initial search
+- Buffer switching timing to ensure content is fully rendered before display
+- Proper indentation using ~indent-region~ for all org-mode content
+- Line break consistency: no blank line after heading, blank line before next entry, blank line before file list
+
+** Changed
+- Buffer formatting now uses proper org-mode structure with consistent spacing
+- Shared message display uses subheadings (~**~) instead of quote blocks
+- Error handling improved for HTTP response parsing with better user feedback
+
+* [0.0.1] - 2025-10-18
+
+** Added
+- Initial release
+- Basic Slack message search functionality
+- Org-mode formatted results with clickable links
+- Support for channels, DMs, group DMs, and private channels
+- Slack mrkdwn to org-mode conversion (code blocks, inline code, links)
+- Automatic pagination for search results
+- Custom Slack link handler (~slack://~) with optional browser tab cleanup on macOS

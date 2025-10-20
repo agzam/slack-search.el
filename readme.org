@@ -118,6 +118,10 @@ You can also customize which browser it targets and the delay before closing the
 (setq slack-search-close-tab-delay 2.0)           ; seconds
 #+end_src
 
+* Changelog
+
+See [[file:changelog.org][changelog.org]] for a detailed list of changes and version history.
+
 * License
 
 Copyright © 2025 Ag Ibragimov
