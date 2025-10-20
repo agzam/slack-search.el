@@ -155,13 +155,20 @@ Call CALLBACK with the parsed JSON response."
        (if (plist-get status :error)
            (message "Slack search error: %s" (plist-get status :error))
          (goto-char (point-min))
-         (re-search-forward "^$")
-         (let* ((json-object-type 'alist)
-                (json-array-type 'list)
-                (json-key-type 'symbol)
-                (response (json-read)))
-           ;; (message "Response: %S" response)
-           (funcall callback response))))
+         ;; Ensure headers are complete before parsing
+         (if (not (re-search-forward "^$" nil t))
+             (message "Slack API: Response headers incomplete")
+           (forward-line 1)
+           (let* ((json-object-type 'alist)
+                  (json-array-type 'list)
+                  (json-key-type 'symbol)
+                  (response (condition-case err
+                                (json-read)
+                              (error 
+                               (message "JSON parse error: %s" (error-message-string err))
+                               nil))))
+             (when response
+               (funcall callback response))))))
      nil t)))
 
 (defun slack-search--parse-result (match)
@@ -315,7 +322,7 @@ Call CALLBACK with the parsed JSON response."
                                          (or orig-timestamp "unknown date")))))))
          ;; Format files list
          (files-str (when files
-                      (concat "\n"
+                      (concat "\n\n"
                               (mapconcat
                                (lambda (file)
                                  (let* ((name (plist-get file :name))
@@ -334,11 +341,10 @@ Call CALLBACK with the parsed JSON response."
                                            size-str
                                            (if type (format ", %s" type) ""))))
                                files
-                               "\n")
-                              "\n"))))
+                               "\n")))))
     (if is-shared
         ;; For shared messages, use a subheading with the shared metadata
-        (insert (format "* %s | %s | [[%s][%s]]\n\n%s\n%s%s\n"
+        (insert (format "* %s | %s | [[%s][%s]]\n%s%s%s\n\n"
                         author-link
                         channel-link
                         permalink-str
@@ -349,7 +355,7 @@ Call CALLBACK with the parsed JSON response."
                           "")
                         (or files-str "")))
       ;; For regular messages, use standard format
-      (insert (format "* %s | %s | [[%s][%s]]\n\n%s%s\n"
+      (insert (format "* %s | %s | [[%s][%s]]\n%s%s\n\n"
                       author-link
                       channel-link
                       permalink-str
