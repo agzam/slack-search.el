@@ -3,6 +3,11 @@
 
 All notable changes to this project will be documented in this file.
 
+* [0.1.0] - 2026-02-17
+** Added
+- slack-creds with functions to retrieve token from the registered slack app and keychain - Mac-only for now
+- slack-thread for viewing individual threads and messages 
+
 * [0.0.2] - 2025-01-20
 
 ** Added

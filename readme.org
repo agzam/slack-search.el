@@ -57,6 +57,11 @@ or put them in an env var, or plain text file - stick them wherever you like, I'
 
 For easy way to get these two, I wrote this automation script [[https://github.com/agzam/lazy-token-catcher][lazy-token-catcher]].
 
+*** But wait, perhaps we don't have to do any of that crap
+
+I did some investigation and dig into how Slack App stores your credentials (I only did this for Mac) and figured a way of extracting token automatically. It should prompt to access the keychain though, don't freak out. 
+Linux way coming soon.
+
 ** Configuration
 
 You need to tell ~slack-search~ how to access session token and 'd-cookie', they set in ~slack-search-token-function~ and ~slack-search-cookie-function~
@@ -100,6 +105,8 @@ Once token and cookie retrieval configured, just run:
 #+begin_src emacs-lisp
 M-x slack-search
 #+end_src
+
+I'm in the process of adding more functionality, I just added a way for displaying messages and threads.
 
 ** Optional: Customize browser tab behavior
 

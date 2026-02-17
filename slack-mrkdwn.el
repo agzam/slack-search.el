@@ -42,9 +42,18 @@ Handles blocks with or without language identifiers."
              (code (match-string-no-properties 2))
              ;; Trim leading/trailing whitespace from code
              (trimmed-code (string-trim code))
-             (replacement (if (and lang (not (string-empty-p lang)))
-                              (format "#+begin_src %s\n%s\n#+end_src" lang trimmed-code)
-                            (format "#+begin_src\n%s\n#+end_src" trimmed-code))))
+             ;; Escape lines starting with * or #+  (org's comma-escape)
+             (escaped-code
+              (mapconcat
+               (lambda (line)
+                 (if (string-match-p "\\`\\(?:\\*\\|#\\+\\)" line)
+                     (concat "," line)
+                   line))
+               (split-string trimmed-code "\n")
+               "\n"))
+             (replacement (format "#+begin_src %s\n%s\n#+end_src"
+                                 (if (and lang (not (string-empty-p lang))) lang "text")
+                                 escaped-code)))
         (delete-region match-start match-end)
         (goto-char match-start)
         (insert replacement)))
