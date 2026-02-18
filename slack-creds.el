@@ -55,15 +55,31 @@
   :type 'string
   :group 'slack-creds)
 
-;;; Token extraction (LevelDB)
+(defcustom slack-creds-gpg-key nil
+  "GPG key ID to encrypt the credentials file.
+When nil, auto-detected from the default secret key."
+  :type '(choice string (const nil))
+  :group 'slack-creds)
+
+(defun slack-creds--gpg-key ()
+  "Return the GPG key to use for encryption.
+Uses `slack-creds-gpg-key' if set, otherwise auto-detects."
+  (or slack-creds-gpg-key
+      (let ((output (string-trim
+                     (shell-command-to-string
+                      "gpg --list-secret-keys --keyid-format long 2>/dev/null | grep '^sec' | head -1 | sed 's|.*/\\([A-F0-9]*\\) .*|\\1|'"))))
+        (if (string-empty-p output)
+            (error "No GPG secret key found. Set `slack-creds-gpg-key'")
+          output))))
+
+;;; Token extraction
 
 (defun slack-creds--extract-tokens ()
-  "Extract xoxc tokens from Slack's LevelDB storage.
-Returns a list of token strings."
-  (let* ((ldb-dir (expand-file-name "Local Storage/leveldb/" slack-creds-slack-data-dir))
-         (cmd (format "strings %s*.ldb %s*.log 2>/dev/null | grep -oE 'xoxc-[A-Za-z0-9_-]+' | sort -u"
-                      (shell-quote-argument ldb-dir)
-                      (shell-quote-argument ldb-dir)))
+  "Extract xoxc tokens from the Slack app's data directory.
+Searches across Local Storage, IndexedDB, Service Worker caches,
+and other binary files.  Returns a list of unique token strings."
+  (let* ((cmd (format "rg -aoN --no-filename 'xoxc-[A-Za-z0-9_-]+' %s 2>/dev/null | sort -u"
+                      (shell-quote-argument slack-creds-slack-data-dir)))
          (output (string-trim (shell-command-to-string cmd))))
     (when (and output (not (string-empty-p output)))
       (split-string output "\n" t))))
@@ -188,15 +204,44 @@ ENTRIES is a list of (host token cookie) triples."
             (cookie (nth 2 entry)))
         (setq contents (slack-creds--update-gpg-entry contents host "token" token))
         (setq contents (slack-creds--update-gpg-entry contents host "cookie" cookie))))
-    ;; Write back
-    (let ((coding-system-for-write 'utf-8))
-      (with-temp-file slack-creds-gpg-file
-        (insert contents)
-        (unless (string-suffix-p "\n" contents)
-          (insert "\n"))))
+    (unless (string-suffix-p "\n" contents)
+      (setq contents (concat contents "\n")))
+    ;; Write via gpg CLI directly - bypasses EPA and its dialogs
+    (let ((tmp (make-temp-file "slack-creds-" nil ".txt")))
+      (unwind-protect
+          (progn
+            (with-temp-file tmp
+              (insert contents))
+            (set-file-modes tmp #o600)
+            (when (file-exists-p slack-creds-gpg-file)
+              (delete-file slack-creds-gpg-file))
+            (let ((exit-code
+                   (call-process
+                    "gpg" nil nil nil
+                    "--batch" "--yes" "--quiet"
+                    "--recipient" (slack-creds--gpg-key)
+                    "--output" (expand-file-name slack-creds-gpg-file)
+                    "--encrypt" tmp)))
+              (unless (zerop exit-code)
+                (error "gpg encrypt failed (exit %d)" exit-code))))
+        (when (file-exists-p tmp)
+          (delete-file tmp))))
     (message "Slack credentials saved to %s" slack-creds-gpg-file)))
 
 ;;; Main entry point
+
+(defun slack-creds--clear-cache ()
+  "Clear auth-source cache for Slack credentials."
+  (when (and (boundp 'auth-source-cache)
+             (hash-table-p auth-source-cache))
+    (let ((keys-to-remove '()))
+      (maphash (lambda (k _v)
+                 (when (and (stringp k)
+                            (string-match-p "slack\\.com" k))
+                   (push k keys-to-remove)))
+               auth-source-cache)
+      (dolist (k keys-to-remove)
+        (remhash k auth-source-cache)))))
 
 ;;;###autoload
 (defun slack-creds-refresh ()
@@ -229,22 +274,38 @@ workspaces via auth.test, and saves to the GPG credentials file."
     (if entries
         (progn
           (slack-creds--save-to-gpg entries)
+          (slack-creds--clear-cache)
+          (setq slack-creds--last-refresh-time (current-time))
           (message "Done. %d workspace(s) updated." (length entries)))
       (error "No valid credentials found"))))
 
-;;;###autoload
-(defun slack-creds-get (host kind)
-  "Get cached credential for HOST (e.g. \"qlikdev.slack.com\").
-KIND is either \"token\" or \"cookie\".
-Reads from the GPG credentials file via `auth-source'."
+(defvar slack-creds--last-refresh-time nil
+  "Time of the last successful `slack-creds-refresh', or nil.")
+
+(defun slack-creds--auth-source-get (host kind)
+  "Look up credential for HOST and KIND from the GPG file via auth-source."
   (let* ((auth-sources (list slack-creds-gpg-file))
-         (auth-source-cache-expiry nil) ; don't use stale cache
+         (auth-source-cache-expiry 0)
          (found (car (auth-source-search :host host :user kind :max 1))))
     (when found
       (let ((secret (plist-get found :secret)))
         (if (functionp secret)
             (funcall secret)
           secret)))))
+
+(defun slack-creds-get (host kind)
+  "Get cached credential for HOST (e.g. \"qlikdev.slack.com\").
+KIND is either \"token\" or \"cookie\".
+Reads from the GPG credentials file via `auth-source'.
+If not found and credentials haven't been refreshed recently,
+automatically runs `slack-creds-refresh' and retries."
+  (or (slack-creds--auth-source-get host kind)
+      ;; Only auto-refresh if we haven't done so in the last 60 seconds
+      (when (or (null slack-creds--last-refresh-time)
+                (> (float-time (time-subtract nil slack-creds--last-refresh-time)) 60))
+        (message "No %s for %s, refreshing credentials..." kind host)
+        (slack-creds-refresh)
+        (slack-creds--auth-source-get host kind))))
 
 (provide 'slack-creds)
 ;;; slack-creds.el ends here

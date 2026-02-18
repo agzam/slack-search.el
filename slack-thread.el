@@ -86,6 +86,8 @@ PARAMS is an alist of query parameters.
 Returns parsed JSON response or nil."
   (let* ((token (slack-creds-get host "token"))
          (cookie (slack-creds-get host "cookie"))
+         (_ (unless token (error "No credentials for %s. Is this workspace logged in to the Slack app?" host)))
+         (_ (unless cookie (error "No cookie for %s. Is this workspace logged in to the Slack app?" host)))
          (url-request-method "GET")
          (url-request-extra-headers
           `(("Authorization" . ,(format "Bearer %s" token))
@@ -96,8 +98,6 @@ Returns parsed JSON response or nil."
          (query-params (url-build-query-string params))
          (url (format "https://slack.com/api/%s?%s" endpoint query-params))
          (buf (url-retrieve-synchronously url t nil 15)))
-    (unless token (error "No token found for %s. Run `slack-creds-refresh'" host))
-    (unless cookie (error "No cookie found for %s. Run `slack-creds-refresh'" host))
     (when buf
       (unwind-protect
           (with-current-buffer buf
