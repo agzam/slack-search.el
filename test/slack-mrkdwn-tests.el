@@ -121,6 +121,23 @@
     (expect (slack-mrkdwn--convert-links "")
             :to-equal "")))
 
+(describe "slack-mrkdwn--convert-strikethrough"
+  (it "converts strikethrough to org format"
+    (expect (slack-mrkdwn--convert-strikethrough "~deleted text~")
+            :to-equal "+deleted text+"))
+
+  (it "converts multiple strikethrough segments"
+    (expect (slack-mrkdwn--convert-strikethrough "~one~ and ~two~")
+            :to-equal "+one+ and +two+"))
+
+  (it "does not convert tildes spanning multiple lines"
+    (expect (slack-mrkdwn--convert-strikethrough "~multi\nline~")
+            :to-equal "~multi\nline~"))
+
+  (it "handles text without strikethrough"
+    (expect (slack-mrkdwn--convert-strikethrough "regular text")
+            :to-equal "regular text")))
+
 (describe "slack-mrkdwn--convert-blockquotes"
   (it "converts single blockquote line"
     (expect (slack-mrkdwn--convert-blockquotes "&gt; quoted text")

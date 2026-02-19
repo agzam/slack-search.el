@@ -111,6 +111,15 @@ Converts both <url|text> and bare <url> formats."
       (replace-match "[[\\1]]" t))
     (buffer-string)))
 
+(defun slack-mrkdwn--convert-strikethrough (text)
+  "Convert Slack strikethrough (~text~) to org strikethrough (+text+) in TEXT."
+  (with-temp-buffer
+    (insert text)
+    (goto-char (point-min))
+    (while (re-search-forward "~\\([^~\n]+\\)~" nil t)
+      (replace-match "+\\1+" t))
+    (buffer-string)))
+
 (defun slack-mrkdwn--convert-blockquotes (text)
   "Convert Slack blockquotes to org-mode quote lines in TEXT.
 Slack uses `&gt;' (HTML-encoded `>') at the start of a line for quotes.
@@ -127,14 +136,14 @@ This handles:
 - Links: <url|text> → [[url][text]]
 - Bare URLs: <url> → [[url]]
 - Blockquotes: &gt; text → │ text
+- Strikethrough: ~text~ → +text+
 
 Not yet implemented:
 - User mentions: <@USER_ID>
 - Channel mentions: <#CHANNEL_ID>
 - Special formatting (these mostly work as-is in `org-mode')
   - Bold: *text*
-  - Italic: _text_
-  - Strikethrough: ~text~"
+  - Italic: _text_"
   (when (stringp text)
     (let* ((protected-blocks '())
            (counter 0)
@@ -156,6 +165,9 @@ Not yet implemented:
 
       ;; Convert blockquotes (before restoring code blocks)
       (setq text-with-placeholders (slack-mrkdwn--convert-blockquotes text-with-placeholders))
+
+      ;; Convert strikethrough ~text~ -> +text+ (before inline code, which also uses ~)
+      (setq text-with-placeholders (slack-mrkdwn--convert-strikethrough text-with-placeholders))
       
       ;; Restore and convert code blocks
       (dolist (pair protected-blocks)
