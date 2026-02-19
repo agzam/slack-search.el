@@ -40,7 +40,8 @@ check-compile: deps
 	--eval "(byte-compile-file \"slacko-creds.el\")" \
 	--eval "(byte-compile-file \"slacko-render.el\")" \
 	--eval "(byte-compile-file \"slacko.el\")" \
-	--eval "(byte-compile-file \"slacko-thread.el\")"
+	--eval "(byte-compile-file \"slacko-thread.el\")" \
+	--eval "(byte-compile-file \"slacko-emoji.el\")"
 
 compile:
 	@echo "Byte-compiling package files..."
@@ -48,7 +49,8 @@ compile:
 	--eval "(byte-compile-file \"slacko-creds.el\")" \
 	--eval "(byte-compile-file \"slacko-render.el\")" \
 	--eval "(byte-compile-file \"slacko.el\")" \
-	--eval "(byte-compile-file \"slacko-thread.el\")"
+	--eval "(byte-compile-file \"slacko-thread.el\")" \
+	--eval "(byte-compile-file \"slacko-emoji.el\")"
 
 clean:
 	@echo "Cleaning compiled files..."

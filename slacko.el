@@ -199,7 +199,39 @@ Returns parsed JSON response or nil."
           :conversation-type conversation-type
           :share-info share-info)))
 
+(defun slacko--fetch-reactions (host channel-id ts)
+  "Fetch reactions for a message at TS in CHANNEL-ID on HOST.
+Uses conversations.history with inclusive=true and limit=1.
+Returns the reactions alist or nil."
+  (let ((resp (slacko-creds-api-request
+               host "conversations.history"
+               `((channel ,channel-id)
+                 (latest ,ts)
+                 (inclusive "true")
+                 (limit "1")))))
+    (when (eq (alist-get 'ok resp) t)
+      (let ((msg (car (alist-get 'messages resp))))
+        (alist-get 'reactions msg)))))
 
+(defun slacko--enrich-matches-with-reactions (matches)
+  "Enrich search MATCHES with reactions from the API.
+Slack's search.messages doesn't return reactions.  For messages
+where `no_reactions' is absent, fetch the full message to get them.
+Mutates and returns MATCHES."
+  (dolist (match matches)
+    (unless (alist-get 'no_reactions match)
+      (let* ((channel (alist-get 'channel match))
+             (channel-id (when channel (alist-get 'id channel)))
+             (ts (alist-get 'ts match))
+             (permalink (alist-get 'permalink match))
+             (host (when (and (stringp permalink)
+                              (string-match "https://\\([^/]+\\)" permalink))
+                     (match-string 1 permalink))))
+        (when (and host channel-id ts)
+          (let ((reactions (slacko--fetch-reactions host channel-id ts)))
+            (when reactions
+              (nconc match (list (cons 'reactions reactions)))))))))
+  matches)
 
 (defun slacko--display-results (response &optional append)
   "Display search results from RESPONSE in `org-mode' buffer.
@@ -214,7 +246,10 @@ If APPEND is non-nil, append to existing results."
     ;; (message "DEBUG: ok=%s, matches count=%s, total=%s" ok (length matches) total)
     (if (not ok)
         (message "Slack search failed: %s" (alist-get 'error response))
-      
+
+      ;; Enrich matches with reactions (search.messages doesn't return them)
+      (setq matches (slacko--enrich-matches-with-reactions matches))
+
       (let ((buffer (get-buffer-create slacko-search-buffer-name)))
         (with-current-buffer buffer
         (let ((saved-point (when append (point)))

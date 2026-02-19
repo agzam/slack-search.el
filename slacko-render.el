@@ -251,7 +251,12 @@ Returns nil when channel info is not available."
   (when reactions
     (insert (mapconcat
              (lambda (r)
-               (format ":%s: %d" (alist-get 'name r) (alist-get 'count r)))
+               (let ((count-str (number-to-string (alist-get 'count r))))
+                                   (concat
+                                   (format ":%s:" (alist-get 'name r))
+                                   (propertize (concat "\u200B" count-str)
+                              'display `(raise 0.3)
+                              'face 'slacko-emoji-count))))
              reactions "  ")
             "\n")))
 
