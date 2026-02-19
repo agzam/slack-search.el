@@ -258,7 +258,9 @@ CHANNEL-ID and URL are for context."
   "Major mode for displaying a captured Slack thread.
 Derived from `org-mode'.
 \\{slack-thread-mode-map}"
-  (setq buffer-read-only t))
+  (setq buffer-read-only t)
+  ;; Blockquote highlighting
+  (font-lock-add-keywords nil slack-mrkdwn-font-lock-keywords))
 
 ;;; Interactive Commands
 

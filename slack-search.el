@@ -459,8 +459,8 @@ author, channel, timestamp, and message content with proper formatting.
 \\{slack-search-mode-map}"
   ;; Set buffer to read-only by default
   (setq buffer-read-only t)
-  ;; Add any additional mode-specific setup here
-  )
+  ;; Blockquote highlighting
+  (font-lock-add-keywords nil slack-mrkdwn-font-lock-keywords))
 
 ;;; Interactive Commands
 

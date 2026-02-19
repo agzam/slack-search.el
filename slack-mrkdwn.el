@@ -25,6 +25,32 @@
 
 (require 'subr-x)
 
+;;; Faces
+
+(defface slack-mrkdwn-blockquote-face
+  '((((class color) (background light))
+     :foreground "gray50" :slant italic :extend t)
+    (((class color) (background dark))
+     :foreground "gray60" :slant italic :extend t))
+  "Face for blockquoted text in Slack messages."
+  :group 'slack-search)
+
+(defface slack-mrkdwn-blockquote-bar-face
+  '((((class color) (background light))
+     :foreground "gray70")
+    (((class color) (background dark))
+     :foreground "gray40"))
+  "Face for the │ bar character in blockquotes."
+  :group 'slack-search)
+
+;;; Font-lock
+
+(defvar slack-mrkdwn-font-lock-keywords
+  `((,(rx bol (zero-or-more blank) (group "│") (group " " (zero-or-more nonl)))
+     (1 'slack-mrkdwn-blockquote-bar-face t)
+     (2 'slack-mrkdwn-blockquote-face t)))
+  "Font-lock keywords for Slack mrkdwn elements.")
+
 ;;; Conversion Functions
 
 (defun slack-mrkdwn--convert-code-blocks (text)
@@ -85,6 +111,13 @@ Converts both <url|text> and bare <url> formats."
       (replace-match "[[\\1]]" t))
     (buffer-string)))
 
+(defun slack-mrkdwn--convert-blockquotes (text)
+  "Convert Slack blockquotes to org-mode quote lines in TEXT.
+Slack uses `&gt;' (HTML-encoded `>') at the start of a line for quotes.
+Converts to `│' prefix for a lightweight visual quote indicator."
+  (replace-regexp-in-string
+   "^&gt; ?" "│ " text))
+
 (defun slack-mrkdwn-to-org (text)
   "Convert Slack mrkdwn TEXT to `org-mode' format.
 
@@ -93,6 +126,7 @@ This handles:
 - Inline code: `code` → ~code~
 - Links: <url|text> → [[url][text]]
 - Bare URLs: <url> → [[url]]
+- Blockquotes: &gt; text → │ text
 
 Not yet implemented:
 - User mentions: <@USER_ID>
@@ -119,6 +153,9 @@ Not yet implemented:
       
       ;; Process links (now code blocks are protected)
       (setq text-with-placeholders (slack-mrkdwn--convert-links text-with-placeholders))
+
+      ;; Convert blockquotes (before restoring code blocks)
+      (setq text-with-placeholders (slack-mrkdwn--convert-blockquotes text-with-placeholders))
       
       ;; Restore and convert code blocks
       (dolist (pair protected-blocks)

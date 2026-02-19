@@ -31,17 +31,17 @@
   (it "converts multiline code block without language"
     (let ((input "```\nsome code\nmore code\n```"))
       (expect (slack-mrkdwn--convert-code-blocks input)
-              :to-equal "#+begin_src\nsome code\nmore code\n#+end_src")))
+              :to-equal "#+begin_src text\nsome code\nmore code\n#+end_src")))
 
   (it "converts single-line code block without newlines"
     (let ((input "```export OHI_TOKEN='secret'```"))
       (expect (slack-mrkdwn--convert-code-blocks input)
-              :to-equal "#+begin_src\nexport OHI_TOKEN='secret'\n#+end_src")))
+              :to-equal "#+begin_src text\nexport OHI_TOKEN='secret'\n#+end_src")))
 
   (it "converts code block starting on same line without language"
     (let ((input "```stream | project_types\ndiscovered_schema | data\n```"))
       (expect (slack-mrkdwn--convert-code-blocks input)
-              :to-equal "#+begin_src\nstream | project_types\ndiscovered_schema | data\n#+end_src")))
+              :to-equal "#+begin_src text\nstream | project_types\ndiscovered_schema | data\n#+end_src")))
 
   (it "does not treat first word as language without newline"
     (let ((input "```server: https://example.com:6448```"))
@@ -58,12 +58,12 @@
   (it "handles empty code blocks"
     (let ((input "``````"))
       (expect (slack-mrkdwn--convert-code-blocks input)
-              :to-equal "#+begin_src\n\n#+end_src")))
+              :to-equal "#+begin_src text\n\n#+end_src")))
 
   (it "trims whitespace from code content"
     (let ((input "```\n  code with spaces  \n```"))
       (expect (slack-mrkdwn--convert-code-blocks input)
-              :to-equal "#+begin_src\ncode with spaces\n#+end_src")))
+              :to-equal "#+begin_src text\ncode with spaces\n#+end_src")))
 
   (it "preserves internal whitespace and newlines"
     (let ((input "```\nline1\n\nline2\n  indented\n```"))
@@ -120,6 +120,27 @@
   (it "handles empty string"
     (expect (slack-mrkdwn--convert-links "")
             :to-equal "")))
+
+(describe "slack-mrkdwn--convert-blockquotes"
+  (it "converts single blockquote line"
+    (expect (slack-mrkdwn--convert-blockquotes "&gt; quoted text")
+            :to-equal "│ quoted text"))
+
+  (it "converts blockquote without space after marker"
+    (expect (slack-mrkdwn--convert-blockquotes "&gt;quoted text")
+            :to-equal "│ quoted text"))
+
+  (it "converts multiline blockquote"
+    (expect (slack-mrkdwn--convert-blockquotes "&gt; line one\n&gt; line two")
+            :to-equal "│ line one\n│ line two"))
+
+  (it "does not convert &gt; in the middle of a line"
+    (expect (slack-mrkdwn--convert-blockquotes "foo &gt; bar")
+            :to-equal "foo &gt; bar"))
+
+  (it "handles mixed quoted and unquoted lines"
+    (expect (slack-mrkdwn--convert-blockquotes "normal\n&gt; quoted\nnormal again")
+            :to-equal "normal\n│ quoted\nnormal again")))
 
 (describe "slack-mrkdwn-to-org"
   (it "handles nil input"
