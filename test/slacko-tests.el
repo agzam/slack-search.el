@@ -266,6 +266,66 @@
       (expect 'message :to-have-been-called-with
               "Slack search failed: %s" "invalid_auth"))))
 
+(describe "slacko--available-hosts"
+  (it "returns hosts from auth-source"
+    (spy-on 'auth-source-search :and-return-value
+            '((:host "teamA.slack.com") (:host "teamB.slack.com")))
+    (let ((slacko-creds-gpg-file "/tmp/fake.gpg")
+          (slacko-creds--legacy-gpg-file "/tmp/other.gpg"))
+      (expect (slacko--available-hosts)
+              :to-equal '("teamA.slack.com" "teamB.slack.com"))))
+
+  (it "auto-refreshes when no hosts found"
+    (let ((call-count 0)
+          (slacko-creds-gpg-file "/tmp/fake.gpg")
+          (slacko-creds--legacy-gpg-file "/tmp/other.gpg")
+          (slacko-creds--last-refresh-time nil))
+      (spy-on 'auth-source-search :and-call-fake
+              (lambda (&rest _)
+                (setq call-count (1+ call-count))
+                (if (= call-count 1) nil
+                  '((:host "refreshed.slack.com")))))
+      (spy-on 'slacko-creds-refresh)
+      (expect (slacko--available-hosts)
+              :to-equal '("refreshed.slack.com"))
+      (expect 'slacko-creds-refresh :to-have-been-called))))
+
+(describe "slacko--prompt-host"
+  (it "returns the only host without prompting"
+    (spy-on 'slacko--available-hosts :and-return-value '("only.slack.com"))
+    (spy-on 'completing-read)
+    (expect (slacko--prompt-host) :to-equal "only.slack.com")
+    (expect 'completing-read :not :to-have-been-called))
+
+  (it "prompts when multiple hosts available"
+    (spy-on 'slacko--available-hosts :and-return-value
+            '("teamA.slack.com" "teamB.slack.com"))
+    (spy-on 'completing-read :and-return-value "teamB.slack.com")
+    (expect (slacko--prompt-host) :to-equal "teamB.slack.com")
+    (expect 'completing-read :to-have-been-called))
+
+  (it "errors when no hosts available"
+    (spy-on 'slacko--available-hosts :and-return-value nil)
+    (expect (slacko--prompt-host) :to-throw 'error)))
+
+(describe "slacko--default-host"
+  (it "prefers slacko-default-host when set"
+    (let ((slacko-default-host "custom.slack.com"))
+      (spy-on 'slacko--available-hosts)
+      (expect (slacko--default-host) :to-equal "custom.slack.com")
+      (expect 'slacko--available-hosts :not :to-have-been-called)))
+
+  (it "falls back to first available host"
+    (let ((slacko-default-host nil))
+      (spy-on 'slacko--available-hosts :and-return-value
+              '("first.slack.com" "second.slack.com"))
+      (expect (slacko--default-host) :to-equal "first.slack.com")))
+
+  (it "errors when no hosts available"
+    (let ((slacko-default-host nil))
+      (spy-on 'slacko--available-hosts :and-return-value nil)
+      (expect (slacko--default-host) :to-throw 'error))))
+
 ;; Local Variables:
 ;; package-lint-main-file: "slacko.el"
 ;; End:

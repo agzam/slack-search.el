@@ -134,26 +134,54 @@ In thread buffers (or anywhere else), links open in the Slack app."
 
 ;;; Helper Functions
 
+(defun slacko--available-hosts ()
+  "Return a list of all known Slack workspace hosts from the credentials file.
+If no hosts found and credentials haven't been refreshed recently,
+automatically runs `slacko-creds-refresh' and retries."
+  (let* ((auth-sources (append (list slacko-creds-gpg-file)
+                               (when (and (not (string= slacko-creds-gpg-file
+                                                        slacko-creds--legacy-gpg-file))
+                                          (file-exists-p slacko-creds--legacy-gpg-file))
+                                 (list slacko-creds--legacy-gpg-file))))
+         (auth-source-cache-expiry 0)
+         (found (auth-source-search :user "token" :max 10))
+         (hosts (delq nil (mapcar (lambda (entry) (plist-get entry :host)) found))))
+    (or hosts
+        ;; Auto-refresh if no hosts found (throttled to 60s)
+        (when (or (null slacko-creds--last-refresh-time)
+                  (> (float-time (time-subtract nil slacko-creds--last-refresh-time)) 60))
+          (message "No workspaces found, refreshing credentials...")
+          (slacko-creds-refresh)
+          (let ((found2 (auth-source-search :user "token" :max 10)))
+            (delq nil (mapcar (lambda (entry) (plist-get entry :host)) found2)))))))
+
+(defun slacko--prompt-host ()
+  "Prompt the user to select a Slack workspace from available ones."
+  (let ((hosts (slacko--available-hosts)))
+    (cond
+     ((null hosts)
+      (error "No Slack workspaces found. Run `slacko-creds-refresh'"))
+     ((= (length hosts) 1)
+      (car hosts))
+     (t
+      (completing-read "Slack workspace: " hosts nil t)))))
+
 (defun slacko--default-host ()
   "Return the default workspace host for search.
 Uses `slacko-default-host' if set, otherwise discovers the first
 workspace from the credentials file."
   (or slacko-default-host
-      (let* ((auth-sources (append (list slacko-creds-gpg-file)
-                                   (when (and (not (string= slacko-creds-gpg-file
-                                                            slacko-creds--legacy-gpg-file))
-                                              (file-exists-p slacko-creds--legacy-gpg-file))
-                                     (list slacko-creds--legacy-gpg-file))))
-             (auth-source-cache-expiry 0)
-             (found (car (auth-source-search :user "token" :max 1))))
-        (when found
-          (plist-get found :host)))
+      (car (slacko--available-hosts))
       (error "No Slack workspace found. Run `slacko-creds-refresh' or set `slacko-default-host'")))
+
+(defvar slacko--current-host nil
+  "The workspace host used for the current search session.")
 
 (defun slacko--make-request (query page)
   "Send a search request to Slack API for QUERY at PAGE.
+Uses `slacko--current-host' if set, otherwise `slacko--default-host'.
 Returns parsed JSON response or nil."
-  (let ((host (slacko--default-host)))
+  (let ((host (or slacko--current-host (slacko--default-host))))
     (slacko-creds-api-request
      host "search.messages"
      `((query ,query)
@@ -353,15 +381,21 @@ author, channel, timestamp, and message content with proper formatting.
 ;;; Interactive Commands
 
 ;;;###autoload
-(defun slacko-search (query)
+(defun slacko-search (query &optional host)
   "Search Slack messages for QUERY.
-Display results in an `org-mode' buffer with pagination."
-  (interactive "sSearch Slack: ")
+Display results in an `org-mode' buffer with pagination.
+
+With a prefix argument (\\[universal-argument]), prompt for the
+workspace to search in.  Otherwise uses `slacko-default-host' or
+the first available workspace."
+  (interactive
+   (let ((host (when current-prefix-arg (slacko--prompt-host))))
+     (list (read-string "Search Slack: ") host)))
   (setq slacko--current-query query
+        slacko--current-host host
         slacko--current-page 1
         slacko--total-pages nil
         slacko--loading nil)
-  ;; (message "Searching Slack for: %s" query)
   (let ((response (slacko--make-request query 1)))
     (when response
       (slacko--display-results response nil))))

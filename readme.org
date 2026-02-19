@@ -84,20 +84,20 @@ Here's how you can grab them from a given netrc-format encrypted file:
 
 ** Multiple Slack workspaces
 
-The Slack session token encodes which Slack org it belongs to, so if you want to use the package with multiple Slack workspaces, you'll need to switch credentials before searching. You could wrap the search command to set these dynamically, e.g., 
+All workspaces you're signed into in the Slack desktop app are automatically discovered and stored in the credentials file. By default, ~slacko-search~ uses ~slacko-default-host~ or the first workspace found.
+
+To choose a specific workspace, invoke with a prefix argument:
+
+#+begin_src
+C-u M-x slacko-search
+#+end_src
+
+This prompts you to pick from available workspaces before entering the search query. If only one workspace exists, it's selected automatically.
+
+You can also set a preferred default:
 
 #+begin_src emacs-lisp
-(defun my-slacko-search-org1 ()
-  (interactive)
-  (setq slacko-token-function (lambda () (get-token-for "org1.slack.com")))
-  (setq slacko-cookie-function (lambda () (get-cookie-for "org1.slack.com")))
-  (call-interactively #'slacko-search))
-
-(defun my-slacko-search-org2 ()
-  (interactive)
-  (setq slacko-token-function (lambda () (get-token-for "org2.slack.com")))
-  (setq slacko-cookie-function (lambda () (get-cookie-for "org2.slack.com")))
-  (call-interactively #'slacko-search))
+(setq slacko-default-host "myteam.slack.com")
 #+end_src
 
 ** Usage

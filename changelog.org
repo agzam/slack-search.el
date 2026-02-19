@@ -3,6 +3,12 @@
 
 All notable changes to this project will be documented in this file.
 
+* [1.1.0] - 2026-02-19
+** Added
+- Interactive workspace selection with ~C-u slacko-search~ - when invoked with a prefix argument, prompts to choose from available Slack workspaces before searching
+- ~slacko--available-hosts~ function to discover all workspaces from the credentials file, with auto-refresh when none found
+- ~slacko--prompt-host~ for completing-read based workspace selection
+
 * [1.0.0] - 2026-02-19
 ** Changed
 - Renamed project from ~slack-search~ to ~slacko~ (a.k.a. "El Slacko")
