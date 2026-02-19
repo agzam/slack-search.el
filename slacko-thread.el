@@ -26,6 +26,8 @@
 (require 'slacko-creds)
 (require 'slacko-render)
 
+(declare-function slacko-open-in-slack "slacko" nil)
+
 ;;; Customizable Variables
 
 (defgroup slacko-thread nil
@@ -165,6 +167,7 @@ CHANNEL-ID and URL are for context."
 (defvar slacko-thread-mode-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map org-mode-map)
+    (define-key map (kbd "C-c o") #'slacko-open-in-slack)
     map)
   "Keymap for `slacko-thread-mode'.")
 

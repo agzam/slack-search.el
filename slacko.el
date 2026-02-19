@@ -26,6 +26,7 @@
 (require 'slacko-mrkdwn)
 (require 'slacko-render)
 (require 'slacko-creds)
+(require 'slacko-thread)
 
 ;;; Customizable Variables
 
@@ -87,20 +88,44 @@ Only used when `slacko-inhibit-redirect-browser-tab' is non-nil."
 
 ;;; Org-mode Link Handler
 
+(defun slacko--open-in-slack (url)
+  "Open URL in the Slack desktop app via browser redirect.
+URL should be an https:// Slack link."
+  (browse-url url)
+  (when (and slacko-inhibit-redirect-browser-tab
+             (eq system-type 'darwin))
+    (run-at-time slacko-close-tab-delay nil
+                 (lambda ()
+                   (let ((jxa-script (format "Application('%s').windows[0].activeTab.close(); Application('Slack').activate();"
+                                             slacko-browser-name)))
+                     (shell-command (format "osascript -l JavaScript -e \"%s\"" jxa-script)))))))
+
+(defun slacko--message-permalink-p (path)
+  "Return non-nil if PATH points to a Slack message permalink.
+Matches /archives/CHANNEL/pTIMESTAMP pattern."
+  (string-match-p "/archives/[^/]+/p[0-9]+" path))
+
 (defun slacko--follow-link (path)
-  "Open Slack link from PATH and close browser tab.
-PATH should be the part after slack:// prefix."
+  "Follow a slack:// link.
+PATH is the part after the \"slack:\" prefix.
+In search buffers, message permalinks open in `slacko-thread-capture'.
+In thread buffers (or anywhere else), links open in the Slack app."
   (let ((url (concat "https:" path)))
-    ;; Open the URL (which will redirect to Slack app)
-    (browse-url url)
-    ;; Close the browser tab after a delay (macOS only)
-    (when (and slacko-inhibit-redirect-browser-tab
-               (eq system-type 'darwin))
-      (run-at-time slacko-close-tab-delay nil
-                   (lambda ()
-                     (let ((jxa-script (format "Application('%s').windows[0].activeTab.close(); Application('Slack').activate();"
-                                               slacko-browser-name)))
-                       (shell-command (format "osascript -l JavaScript -e \"%s\"" jxa-script))))))))
+    (if (and (derived-mode-p 'slacko-search-mode)
+             (slacko--message-permalink-p path))
+        (slacko-thread-capture url)
+      (slacko--open-in-slack url))))
+
+(defun slacko-open-in-slack ()
+  "Open the Slack link at point in the Slack desktop app."
+  (interactive)
+  (let* ((context (org-element-context))
+         (link (when (eq (org-element-type context) 'link)
+                 (org-element-property :raw-link context))))
+    (if (and link (string-prefix-p "slack:" link))
+        (slacko--open-in-slack
+         (replace-regexp-in-string "^slack:" "https:" link))
+      (user-error "No Slack link at point"))))
 
 ;; Register the slack:// link type with org-mode
 (org-link-set-parameters
@@ -309,9 +334,8 @@ If APPEND is non-nil, append to existing results."
 
 (defvar slacko-search-mode-map
   (let ((map (make-sparse-keymap)))
-    ;; Inherit from org-mode-map
     (set-keymap-parent map org-mode-map)
-    ;; Add custom keybindings here if needed
+    (define-key map (kbd "C-c o") #'slacko-open-in-slack)
     map)
   "Keymap for `slacko-search-mode'.")
 
