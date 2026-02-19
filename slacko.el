@@ -21,10 +21,11 @@
 ;;
 ;;; Code:
 
-(require 'url)
 (require 'json)
 (require 'org)
 (require 'slacko-mrkdwn)
+(require 'slacko-render)
+(require 'slacko-creds)
 
 ;;; Customizable Variables
 
@@ -33,16 +34,10 @@
   :group 'tools
   :prefix "slacko-")
 
-(defcustom slacko-token-function nil
-  "Function that returns the Slack API token.
-Should return a string containing the Bearer token."
-  :type 'function
-  :group 'slacko)
-
-(defcustom slacko-cookie-function nil
-  "Function that returns the Slack cookie.
-Should return a string containing the `d' cookie value."
-  :type 'function
+(defcustom slacko-default-host nil
+  "Default Slack workspace host for search (e.g. \"myteam.slack.com\").
+When nil, uses the first workspace found in the credentials file."
+  :type '(choice string (const nil))
   :group 'slacko)
 
 (defcustom slacko-search-buffer-name "*Slack Search*"
@@ -114,74 +109,41 @@ PATH should be the part after slack:// prefix."
 
 ;;; Helper Functions
 
+(defun slacko--default-host ()
+  "Return the default workspace host for search.
+Uses `slacko-default-host' if set, otherwise discovers the first
+workspace from the credentials file."
+  (or slacko-default-host
+      (let* ((auth-sources (append (list slacko-creds-gpg-file)
+                                   (when (and (not (string= slacko-creds-gpg-file
+                                                            slacko-creds--legacy-gpg-file))
+                                              (file-exists-p slacko-creds--legacy-gpg-file))
+                                     (list slacko-creds--legacy-gpg-file))))
+             (auth-source-cache-expiry 0)
+             (found (car (auth-source-search :user "token" :max 1))))
+        (when found
+          (plist-get found :host)))
+      (error "No Slack workspace found. Run `slacko-creds-refresh' or set `slacko-default-host'")))
 
-
-(defun slacko--get-token ()
-  "Get the Slack API token."
-  (if slacko-token-function
-      (funcall slacko-token-function)
-    (error "`slacko-token-function` is not set")))
-
-(defun slacko--get-cookie ()
-  "Get the Slack cookie."
-  (if slacko-cookie-function
-      (funcall slacko-cookie-function)
-    (error "`slacko-cookie-function` is not set")))
-
-(defun slacko--make-request (query page callback)
+(defun slacko--make-request (query page)
   "Send a search request to Slack API for QUERY at PAGE.
-Call CALLBACK with the parsed JSON response."
-  (let* ((url-request-method "GET")
-         (token (slacko--get-token))
-         (cookie (slacko--get-cookie))
-         (url-request-extra-headers
-          `(("Authorization" . ,(format "Bearer %s" token))
-            ("Cookie" . ,(format "d=%s; " cookie))
-            ("Content-Type" . "application/json")))
-         (query-params
-          (url-build-query-string
-           `((query ,query)
-             (count ,(number-to-string slacko-search-results-per-page))
-             (page ,(number-to-string page)))))
-         (url (format "https://slack.com/api/search.messages?%s" query-params))
-         ;; Prevent url-retrieve from adding cookies automatically
-         (url-cookie-storage nil)
-         (url-cookie-secure-storage nil))
-    ;; (message "Request URL: %s" url)
-    ;; (message "Headers: %S" url-request-extra-headers)
-    (url-retrieve
-     url
-     (lambda (status)
-       (if (plist-get status :error)
-           (message "Slack search error: %s" (plist-get status :error))
-         (goto-char (point-min))
-         ;; Ensure headers are complete before parsing
-         (if (not (re-search-forward "^$" nil t))
-             (message "Slack API: Response headers incomplete")
-           (forward-line 1)
-           (let* ((json-object-type 'alist)
-                  (json-array-type 'list)
-                  (json-key-type 'symbol)
-                  (response (condition-case err
-                                (json-read)
-                              (error 
-                               (message "JSON parse error: %s" (error-message-string err))
-                               nil))))
-             (when response
-               (funcall callback response))))))
-     nil t)))
+Returns parsed JSON response or nil."
+  (let ((host (slacko--default-host)))
+    (slacko-creds-api-request
+     host "search.messages"
+     `((query ,query)
+       (count ,(number-to-string slacko-search-results-per-page))
+       (page ,(number-to-string page))))))
 
 (defun slacko--parse-result (match)
-  "Parse a single search result MATCH into display format."
+  "Normalize a search result MATCH into a plist for `slacko-render-message'."
   (let* ((username (alist-get 'username match))
          (user-id (alist-get 'user match))
          (text (alist-get 'text match))
          (attachments (alist-get 'attachments match))
          (channel (alist-get 'channel match))
          (channel-id (when channel (alist-get 'id channel)))
-         (channel-name (if channel
-                           (alist-get 'name channel)
-                         "unknown"))
+         (channel-name (when channel (alist-get 'name channel)))
          ;; Determine conversation type
          (is-channel (when channel (eq (alist-get 'is_channel channel) t)))
          (is-group (when channel (eq (alist-get 'is_group channel) t)))
@@ -194,174 +156,50 @@ Call CALLBACK with the parsed JSON response."
                              (is-channel "Channel")
                              (t "Unknown")))
          (ts (alist-get 'ts match))
-         (timestamp (when (and ts (stringp ts))
-                      (condition-case nil
-                          (format-time-string "%b %d at %I:%M %p"
-                                              (seconds-to-time (string-to-number ts)))
-                        (error "Unknown date"))))
-         ;; Use the permalink from the API response directly
          (permalink (alist-get 'permalink match))
-         ;; Extract workspace URL from permalink
-         (workspace-url (when (stringp permalink)
-                          (and (string-match "\\(https://[^/]+\\)" permalink)
-                               (match-string 1 permalink))))
-         (thread-ts (alist-get 'thread_ts match))
-         (thread-info (if thread-ts "Thread" ""))
-         ;; Handle attachments (e.g., shared messages from other channels)
-         (attachment-info (when (and attachments (listp attachments))
-                            (let ((first-attach (car attachments)))
-                              (when first-attach
-                                (list :is-share (alist-get 'is_share first-attach)
-                                      :author-name (alist-get 'author_name first-attach)
-                                      :author-id (alist-get 'author_id first-attach)
-                                      :channel-id (alist-get 'channel_id first-attach)
-                                      :from-url (alist-get 'from_url first-attach)
-                                      :attach-text (or (alist-get 'text first-attach)
-                                                      (alist-get 'fallback first-attach)))))))
-         ;; Get text content: prefer main text, fall back to attachment text
+         ;; Derive host from permalink
+         (host (when (and (stringp permalink)
+                          (string-match "https://\\([^/]+\\)" permalink))
+                 (match-string 1 permalink)))
+         ;; Convert permalink to slack://
+         (slack-permalink (when (stringp permalink)
+                           (replace-regexp-in-string "^https:" "slack:" permalink)))
+         ;; Handle attachments (shared messages)
+         (share-info (when (and attachments (listp attachments))
+                       (let ((first-attach (car attachments)))
+                         (when (and first-attach
+                                    (alist-get 'is_share first-attach))
+                           (list :author-name (alist-get 'author_name first-attach)
+                                 :author-id (alist-get 'author_id first-attach)
+                                 :channel-id (alist-get 'channel_id first-attach)
+                                 :from-url (alist-get 'from_url first-attach))))))
+         ;; Get text: prefer main text, fall back to attachment text
          (content-text (if (and (stringp text) (not (string-empty-p text)))
                            text
-                         (when attachment-info
-                           (plist-get attachment-info :attach-text))))
-         ;; Handle files
+                         (when (and attachments (listp attachments))
+                           (let ((first-attach (car attachments)))
+                             (when first-attach
+                               (or (alist-get 'text first-attach)
+                                   (alist-get 'fallback first-attach)))))))
+         ;; Files (pass raw alists - renderer handles them)
          (files (alist-get 'files match))
-         (files-info (when (and files (listp files))
-                       (mapcar (lambda (file)
-                                 (list :name (alist-get 'name file)
-                                       :permalink (alist-get 'permalink file)
-                                       :size (alist-get 'size file)
-                                       :pretty-type (alist-get 'pretty_type file)))
-                               files))))
+         ;; Reactions
+         (reactions (alist-get 'reactions match)))
     (list :author (if (stringp username) username "Unknown")
-          :user-id (if (stringp user-id) user-id nil)
-          :workspace-url (if (stringp workspace-url) workspace-url nil)
-          :channel (if (stringp channel-name) channel-name "unknown")
-          :channel-id (if (stringp channel-id) channel-id nil)
+          :author-id (when (stringp user-id) user-id)
+          :text (or content-text "")
+          :ts ts
+          :permalink (or slack-permalink "")
+          :level 1
+          :files files
+          :reactions reactions
+          :host host
+          :channel-name (when (stringp channel-name) channel-name)
+          :channel-id (when (stringp channel-id) channel-id)
           :conversation-type conversation-type
-          :timestamp (if (stringp timestamp) timestamp "unknown date")
-          :permalink (if (stringp permalink) permalink "")
-          :thread thread-info
-          :text (if (stringp content-text) (slacko-mrkdwn-to-org content-text) "")
-          :attachment-info attachment-info
-          :files files-info)))
+          :share-info share-info)))
 
-(defun slacko--insert-result (result)
-  "Insert a single RESULT into the current buffer."
-  (let* ((author (plist-get result :author))
-         (user-id (plist-get result :user-id))
-         (workspace-url (plist-get result :workspace-url))
-         (channel (plist-get result :channel))
-         (channel-id (plist-get result :channel-id))
-         (conversation-type (plist-get result :conversation-type))
-         (timestamp (plist-get result :timestamp))
-         (permalink (plist-get result :permalink))
-         (thread (plist-get result :thread))
-         (text (plist-get result :text))
-         (attachment-info (plist-get result :attachment-info))
-         (files (plist-get result :files))
-         ;; Ensure all values are strings
-         (author-str (if (stringp author) author "Unknown"))
-         (channel-str (if (stringp channel) channel "unknown"))
-         (timestamp-str (if (stringp timestamp) timestamp "unknown date"))
-         ;; Convert https:// to slack:// for custom link handler
-         (permalink-str (if (stringp permalink)
-                            (replace-regexp-in-string "^https:" "slack:" permalink)
-                          "slack:#"))
-         (text-str (if (stringp text) text ""))
-         ;; Construct user profile link
-         (author-link (if (and (stringp user-id) (stringp workspace-url))
-                          (format "[[slack://%s/team/%s][%s]]"
-                                  (replace-regexp-in-string "^https://" "" workspace-url)
-                                  user-id
-                                  author-str)
-                        author-str))
-         ;; Construct channel link - use conversation type for non-channels
-         (channel-link (if (and (stringp channel-id) (stringp workspace-url))
-                           (let ((link-text (if (string= conversation-type "Channel")
-                                                (format "#%s" channel-str)
-                                              conversation-type)))
-                             (format "[[slack://%s/archives/%s][%s]]"
-                                     (replace-regexp-in-string "^https://" "" workspace-url)
-                                     channel-id
-                                     link-text))
-                         (format "#%s" channel-str)))
-         ;; Handle shared message info
-         (is-shared (and attachment-info (plist-get attachment-info :is-share)))
-         (share-metadata (when is-shared
-                           (let* ((orig-author (plist-get attachment-info :author-name))
-                                  (orig-author-id (plist-get attachment-info :author-id))
-                                  (orig-channel-id (plist-get attachment-info :channel-id))
-                                  (orig-url (plist-get attachment-info :from-url)))
-                             ;; Extract timestamp from the from-url
-                             ;; URL format: https://workspace.slack.com/archives/CHANNEL_ID/pTIMESTAMP
-                             (when (and orig-url (string-match "/archives/\\([^/]+\\)/p\\([0-9]+\\)" orig-url))
-                               (let* ((orig-ts (match-string 2 orig-url))
-                                      (orig-timestamp (when orig-ts
-                                                        (condition-case nil
-                                                            (format-time-string "%b %d at %I:%M %p"
-                                                                                (seconds-to-time (string-to-number (substring orig-ts 0 10))))
-                                                          (error nil))))
-                                      ;; Build author link
-                                      (orig-author-link (if (and orig-author-id workspace-url)
-                                                            (format "[[slack://%s/team/%s][%s]]"
-                                                                    (replace-regexp-in-string "^https://" "" workspace-url)
-                                                                    orig-author-id
-                                                                    (or orig-author "Unknown"))
-                                                          (or orig-author "Unknown")))
-                                      ;; Build channel link
-                                      (orig-channel-link (if (and orig-channel-id workspace-url)
-                                                             (format "[[slack://%s/archives/%s][#%s]]"
-                                                                     (replace-regexp-in-string "^https://" "" workspace-url)
-                                                                     orig-channel-id
-                                                                     orig-channel-id)
-                                                           "#unknown")))
-                                 (format "** /Shared from %s | Posted in %s | [[%s][%s]]/\n"
-                                         orig-author-link
-                                         orig-channel-link
-                                         (replace-regexp-in-string "^https:" "slack:" orig-url)
-                                         (or orig-timestamp "unknown date")))))))
-         ;; Format files list
-         (files-str (when files
-                      (concat "\n\n"
-                              (mapconcat
-                               (lambda (file)
-                                 (let* ((name (plist-get file :name))
-                                        (permalink (plist-get file :permalink))
-                                        (size (plist-get file :size))
-                                        (type (plist-get file :pretty-type))
-                                        ;; Convert bytes to human-readable format
-                                        (size-str (cond
-                                                   ((not size) "")
-                                                   ((< size 1024) (format "%d B" size))
-                                                   ((< size (* 1024 1024)) (format "%.1f KB" (/ size 1024.0)))
-                                                   (t (format "%.1f MB" (/ size 1024.0 1024.0))))))
-                                   (format "- [[%s][%s]] (%s%s)"
-                                           permalink
-                                           name
-                                           size-str
-                                           (if type (format ", %s" type) ""))))
-                               files
-                               "\n")))))
-    (if is-shared
-        ;; For shared messages, use a subheading with the shared metadata
-        (insert (format "* %s | %s | [[%s][%s]]\n%s%s%s\n\n"
-                        author-link
-                        channel-link
-                        permalink-str
-                        timestamp-str
-                        share-metadata
-                        (if (not (string-empty-p text-str))
-                            text-str
-                          "")
-                        (or files-str "")))
-      ;; For regular messages, use standard format
-      (insert (format "* %s | %s | [[%s][%s]]\n%s%s\n\n"
-                      author-link
-                      channel-link
-                      permalink-str
-                      timestamp-str
-                      text-str
-                      (or files-str ""))))))
+
 
 (defun slacko--display-results (response &optional append)
   "Display search results from RESPONSE in `org-mode' buffer.
@@ -394,7 +232,7 @@ If APPEND is non-nil, append to existing results."
           (let ((inhibit-read-only t))
             (goto-char (point-max))
             (dolist (match matches)
-              (slacko--insert-result (slacko--parse-result match)))
+              (slacko-render-message (slacko--parse-result match)))
             
             ;; Indent the entire buffer properly
             (indent-region (point-min) (point-max)))
@@ -423,19 +261,14 @@ If APPEND is non-nil, append to existing results."
           (set-window-start (selected-window) (point-min)))))))
 
 (defun slacko--load-next-page ()
-  "Load the next page of search results asynchronously."
+  "Load the next page of search results."
   (unless slacko--loading
     (setq slacko--loading t)
-    (let ((next-page (1+ slacko--current-page)))
-      ;; (message "Loading page %d of %d..." next-page slacko--total-pages)
-      (slacko--make-request
-       slacko--current-query
-       next-page
-       (lambda (response)
-         (setq slacko--loading nil)
-         (slacko--display-results response t)
-         ;; (message "Loaded page %d of %d" slacko--current-page slacko--total-pages)
-         )))))
+    (let* ((next-page (1+ slacko--current-page))
+           (response (slacko--make-request slacko--current-query next-page)))
+      (setq slacko--loading nil)
+      (when response
+        (slacko--display-results response t)))))
 
 ;;; Major Mode
 
@@ -451,14 +284,12 @@ If APPEND is non-nil, append to existing results."
   "Major mode for displaying Slack search results.
 
 This mode is derived from `org-mode' and displays search results
-from Slack in an organized, readable format. Each result includes
+from Slack in an organized, readable format.  Each result includes
 author, channel, timestamp, and message content with proper formatting.
 
 \\{slacko-search-mode-map}"
-  ;; Set buffer to read-only by default
   (setq buffer-read-only t)
-  ;; Blockquote highlighting
-  (font-lock-add-keywords nil slacko-mrkdwn-font-lock-keywords))
+  (slacko-render-setup-font-lock))
 
 ;;; Interactive Commands
 
@@ -472,11 +303,9 @@ Display results in an `org-mode' buffer with pagination."
         slacko--total-pages nil
         slacko--loading nil)
   ;; (message "Searching Slack for: %s" query)
-  (slacko--make-request
-   query
-   1
-   (lambda (response)
-     (slacko--display-results response nil))))
+  (let ((response (slacko--make-request query 1)))
+    (when response
+      (slacko--display-results response nil))))
 
 (provide 'slacko)
 ;;; slacko.el ends here

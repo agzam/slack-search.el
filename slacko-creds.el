@@ -281,9 +281,17 @@ workspaces via auth.test, and saves to the GPG credentials file."
 (defvar slacko-creds--last-refresh-time nil
   "Time of the last successful `slacko-creds-refresh', or nil.")
 
+(defvar slacko-creds--legacy-gpg-file
+  (expand-file-name ".slack-creds.gpg" user-emacs-directory)
+  "Legacy GPG file path from before the rename to slacko.")
+
 (defun slacko-creds--auth-source-get (host kind)
   "Look up credential for HOST and KIND from the GPG file via auth-source."
-  (let* ((auth-sources (list slacko-creds-gpg-file))
+  (let* ((auth-sources (append (list slacko-creds-gpg-file)
+                               (when (and (not (string= slacko-creds-gpg-file
+                                                        slacko-creds--legacy-gpg-file))
+                                          (file-exists-p slacko-creds--legacy-gpg-file))
+                                 (list slacko-creds--legacy-gpg-file))))
          (auth-source-cache-expiry 0)
          (found (car (auth-source-search :host host :user kind :max 1))))
     (when found
@@ -305,6 +313,42 @@ automatically runs `slacko-creds-refresh' and retries."
         (message "No %s for %s, refreshing credentials..." kind host)
         (slacko-creds-refresh)
         (slacko-creds--auth-source-get host kind))))
+
+;;; API Requests
+
+(defun slacko-creds-api-request (host endpoint params)
+  "Make a synchronous authenticated Slack API request.
+HOST is the workspace domain (e.g. \"foo.slack.com\").
+ENDPOINT is the API method (e.g. \"users.info\").
+PARAMS is an alist of query parameters.
+Returns parsed JSON response or nil."
+  (let* ((token (slacko-creds-get host "token"))
+         (cookie (slacko-creds-get host "cookie"))
+         (_ (unless token
+              (error "No credentials for %s.  Is this workspace logged in?" host)))
+         (_ (unless cookie
+              (error "No cookie for %s.  Is this workspace logged in?" host)))
+         (url-request-method "GET")
+         (url-request-extra-headers
+          `(("Authorization" . ,(format "Bearer %s" token))
+            ("Cookie" . ,(format "d=%s;" cookie))
+            ("Content-Type" . "application/json")))
+         (url-cookie-storage nil)
+         (url-cookie-secure-storage nil)
+         (query-params (url-build-query-string params))
+         (url (format "https://slack.com/api/%s?%s" endpoint query-params))
+         (buf (url-retrieve-synchronously url t nil 15)))
+    (when buf
+      (unwind-protect
+          (with-current-buffer buf
+            (goto-char (point-min))
+            (when (re-search-forward "^$" nil t)
+              (forward-line 1)
+              (let* ((json-object-type 'alist)
+                     (json-array-type 'list)
+                     (json-key-type 'symbol))
+                (json-read))))
+        (kill-buffer buf)))))
 
 (provide 'slacko-creds)
 ;; Local Variables:

@@ -37,12 +37,18 @@ check-compile: deps
 	--eval "(setq byte-compile-error-on-warn t)" \
 	--eval "(add-to-list 'load-path \".\")" \
 	--eval "(byte-compile-file \"slacko-mrkdwn.el\")" \
-	--eval "(byte-compile-file \"slacko.el\")"
+	--eval "(byte-compile-file \"slacko-creds.el\")" \
+	--eval "(byte-compile-file \"slacko-render.el\")" \
+	--eval "(byte-compile-file \"slacko.el\")" \
+	--eval "(byte-compile-file \"slacko-thread.el\")"
 
 compile:
 	@echo "Byte-compiling package files..."
 	emacs --batch --eval "(byte-compile-file \"slacko-mrkdwn.el\")" \
-	--eval "(byte-compile-file \"slacko.el\")"
+	--eval "(byte-compile-file \"slacko-creds.el\")" \
+	--eval "(byte-compile-file \"slacko-render.el\")" \
+	--eval "(byte-compile-file \"slacko.el\")" \
+	--eval "(byte-compile-file \"slacko-thread.el\")"
 
 clean:
 	@echo "Cleaning compiled files..."

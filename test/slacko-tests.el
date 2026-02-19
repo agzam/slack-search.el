@@ -70,12 +70,15 @@
                     (thread_ts . nil)))
            (result (slacko--parse-result match)))
       (expect (plist-get result :author) :to-equal "john_doe")
-      (expect (plist-get result :user-id) :to-equal "U123")
-      (expect (plist-get result :channel) :to-equal "general")
+      (expect (plist-get result :author-id) :to-equal "U123")
+      (expect (plist-get result :channel-name) :to-equal "general")
       (expect (plist-get result :channel-id) :to-equal "C456")
       (expect (plist-get result :conversation-type) :to-equal "Channel")
-      (expect (plist-get result :workspace-url) :to-equal "https://workspace.slack.com")
-      (expect (plist-get result :permalink) :to-equal "https://workspace.slack.com/archives/C456/p1738226435123456")))
+      (expect (plist-get result :host) :to-equal "workspace.slack.com")
+      (expect (plist-get result :permalink)
+              :to-equal "slack://workspace.slack.com/archives/C456/p1738226435123456")
+      (expect (plist-get result :text) :to-equal "Hello world")
+      (expect (plist-get result :level) :to-equal 1)))
 
   (it "identifies DM conversation type"
     (let* ((match `((username . "alice")
@@ -147,9 +150,9 @@
                     (ts . nil)
                     (permalink . "https://workspace.slack.com/archives/C456/p1738226435123456")))
            (result (slacko--parse-result match)))
-      (expect (plist-get result :timestamp) :to-equal "unknown date")))
+      (expect (plist-get result :ts) :to-equal nil)))
 
-  (it "converts text using slacko-mrkdwn-to-org"
+  (it "passes raw text without mrkdwn conversion"
     (let* ((match `((username . "eve")
                     (user . "U333")
                     (text . "Check `code` here")
@@ -159,136 +162,63 @@
                     (ts . "1738226435.123456")
                     (permalink . "https://workspace.slack.com/archives/C456/p1738226435123456")))
            (result (slacko--parse-result match)))
-      (expect (plist-get result :text) :to-match "~code~")))
+      ;; Text should be raw mrkdwn, NOT converted
+      (expect (plist-get result :text) :to-equal "Check `code` here")))
 
-  (it "identifies thread messages"
+  (it "passes raw files from API"
     (let* ((match `((username . "frank")
                     (user . "U444")
-                    (text . "Reply")
+                    (text . "See file")
                     (channel . ((id . "C456")
                                (name . "general")
                                (is_channel . t)))
                     (ts . "1738226435.123456")
                     (permalink . "https://workspace.slack.com/archives/C456/p1738226435123456")
-                    (thread_ts . "1738226400.000000")))
+                    (files . (((name . "test.png")
+                               (permalink . "https://files.slack.com/test.png")
+                               (size . 1024)
+                               (pretty_type . "PNG"))))))
            (result (slacko--parse-result match)))
-      (expect (plist-get result :thread) :to-equal "Thread"))))
+      (expect (plist-get result :files) :not :to-be nil)
+      (expect (alist-get 'name (car (plist-get result :files)))
+              :to-equal "test.png")))
 
-(describe "slacko--insert-result"
-  (it "inserts formatted result with all links"
-    (let* ((result '(:author "john_doe"
-                     :user-id "U123"
-                     :workspace-url "https://workspace.slack.com"
-                     :channel "general"
-                     :channel-id "C456"
-                     :conversation-type "Channel"
-                     :timestamp "Jan 30 at 10:00 AM"
-                     :permalink "https://workspace.slack.com/archives/C456/p123"
-                     :thread ""
-                     :text "Hello world")))
-      (with-temp-buffer
-        (slacko--insert-result result)
-        (let ((output (buffer-string)))
-          ;; Check for author link
-          (expect output :to-match "\\[\\[slack://workspace.slack.com/team/U123\\]\\[john_doe\\]\\]")
-          ;; Check for channel link
-          (expect output :to-match "\\[\\[slack://workspace.slack.com/archives/C456\\]\\[#general\\]\\]")
-          ;; Check for permalink
-          (expect output :to-match "\\[\\[slack://workspace.slack.com/archives/C456/p123\\]\\[Jan 30 at 10:00 AM\\]\\]")
-          ;; Check for text content
-          (expect output :to-match "Hello world")))))
+  (it "extracts reactions from API response"
+    (let* ((match `((username . "grace")
+                    (user . "U555")
+                    (text . "Nice!")
+                    (channel . ((id . "C456")
+                               (name . "general")
+                               (is_channel . t)))
+                    (ts . "1738226435.123456")
+                    (permalink . "https://workspace.slack.com/archives/C456/p1738226435123456")
+                    (reactions . (((name . "thumbsup") (count . 3))
+                                  ((name . "heart") (count . 1))))))
+           (result (slacko--parse-result match)))
+      (expect (plist-get result :reactions) :not :to-be nil)
+      (expect (length (plist-get result :reactions)) :to-equal 2)))
 
-  (it "uses conversation type for DM links"
-    (let* ((result '(:author "alice"
-                     :user-id "U789"
-                     :workspace-url "https://workspace.slack.com"
-                     :channel "unknown"
-                     :channel-id "D123"
-                     :conversation-type "DM"
-                     :timestamp "Jan 30 at 11:00 AM"
-                     :permalink "https://workspace.slack.com/archives/D123/p456"
-                     :thread ""
-                     :text "Private message")))
-      (with-temp-buffer
-        (slacko--insert-result result)
-        (let ((output (buffer-string)))
-          ;; Check that DM is used instead of channel name
-          (expect output :to-match "\\[\\[slack://workspace.slack.com/archives/D123\\]\\[DM\\]\\]")
-          (expect output :not :to-match "#unknown")))))
-
-  (it "handles missing user-id gracefully"
-    (let* ((result '(:author "bob"
-                     :user-id nil
-                     :workspace-url "https://workspace.slack.com"
-                     :channel "general"
-                     :channel-id "C456"
-                     :conversation-type "Channel"
-                     :timestamp "Jan 30 at 12:00 PM"
-                     :permalink "https://workspace.slack.com/archives/C456/p789"
-                     :thread ""
-                     :text "Message")))
-      (with-temp-buffer
-        (slacko--insert-result result)
-        (let ((output (buffer-string)))
-          ;; Should use plain author name without link
-          (expect output :to-match "\\* bob |")
-          (expect output :not :to-match "\\[\\[slack://.*team")))))
-
-  (it "handles missing channel-id gracefully"
-    (let* ((result '(:author "charlie"
-                     :user-id "U111"
-                     :workspace-url "https://workspace.slack.com"
-                     :channel "general"
-                     :channel-id nil
-                     :conversation-type "Channel"
-                     :timestamp "Jan 30 at 01:00 PM"
-                     :permalink "https://workspace.slack.com/archives/C456/p999"
-                     :thread ""
-                     :text "Message")))
-      (with-temp-buffer
-        (slacko--insert-result result)
-        (let ((output (buffer-string)))
-          ;; Should use plain channel name without link (but permalink still has archives)
-          (expect output :to-match "#general")
-          ;; Check that the channel part is NOT a link (just plain text)
-          (expect output :to-match "| #general |")))))
-
-  (it "formats org-mode heading correctly"
-    (let* ((result '(:author "dave"
-                     :user-id "U222"
-                     :workspace-url "https://workspace.slack.com"
-                     :channel "test"
-                     :channel-id "C789"
-                     :conversation-type "Channel"
-                     :timestamp "Jan 30 at 02:00 PM"
-                     :permalink "https://workspace.slack.com/archives/C789/p111"
-                     :thread ""
-                     :text "Test message")))
-      (with-temp-buffer
-        (slacko--insert-result result)
-        (let ((output (buffer-string)))
-          ;; Check org heading starts with *
-          (expect output :to-match "^\\*")
-          ;; Check proper spacing and separators
-          (expect output :to-match "\\* .* | .* | \\[\\[")))))
-
-  (it "preserves formatted text content"
-    (let* ((result '(:author "eve"
-                     :user-id "U333"
-                     :workspace-url "https://workspace.slack.com"
-                     :channel "dev"
-                     :channel-id "C999"
-                     :conversation-type "Channel"
-                     :timestamp "Jan 30 at 03:00 PM"
-                     :permalink "https://workspace.slack.com/archives/C999/p222"
-                     :thread ""
-                     :text "Code: ~npm install~\n\n#+begin_src\nfunction test() {}\n#+end_src")))
-      (with-temp-buffer
-        (slacko--insert-result result)
-        (let ((output (buffer-string)))
-          ;; Check that formatted content is preserved
-          (expect output :to-match "~npm install~")
-          (expect output :to-match "#\\+begin_src"))))))
+  (it "extracts share-info for shared messages"
+    (let* ((match `((username . "hank")
+                    (user . "U666")
+                    (text . "")
+                    (channel . ((id . "C456")
+                               (name . "general")
+                               (is_channel . t)))
+                    (ts . "1738226435.123456")
+                    (permalink . "https://workspace.slack.com/archives/C456/p1738226435123456")
+                    (attachments . (((is_share . t)
+                                     (author_name . "original_user")
+                                     (author_id . "U999")
+                                     (channel_id . "C789")
+                                     (from_url . "https://workspace.slack.com/archives/C789/p1738000000000000")
+                                     (text . "Original message"))))))
+           (result (slacko--parse-result match)))
+      (expect (plist-get result :share-info) :not :to-be nil)
+      (expect (plist-get (plist-get result :share-info) :author-name)
+              :to-equal "original_user")
+      ;; Falls back to attachment text when main text is empty
+      (expect (plist-get result :text) :to-equal "Original message"))))
 
 (describe "slacko--display-results"
   (it "handles successful response with matches"
@@ -305,6 +235,11 @@
                                     (paging . ((page . 1)
                                               (pages . 1)))))
                        (query . "test"))))
+      ;; Stub mention resolution to avoid API calls
+      (spy-on 'slacko-render-resolve-user-mentions :and-call-fake
+              (lambda (_host text) text))
+      (spy-on 'slacko-render-resolve-channel-mentions :and-call-fake
+              (lambda (_host text) text))
       (slacko--display-results response)
       (with-current-buffer slacko-search-buffer-name
         (let ((content (buffer-string)))
