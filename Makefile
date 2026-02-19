@@ -6,7 +6,8 @@ define DEPS_SCRIPT
 (add-to-list 'package-archives '("melpa" . "http://melpa.org/packages/"))
 (package-initialize)
 (package-refresh-contents)
-(package-install 'buttercup))
+(package-install 'buttercup)
+(package-install 'emojify))
 endef
 export DEPS_SCRIPT
 

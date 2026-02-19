@@ -241,8 +241,9 @@
          :reactions (((name . "thumbsup") (count . 3))
                      ((name . "heart") (count . 1)))))
       (let ((output (buffer-string)))
-        (expect output :to-match ":thumbsup: 3")
-        (expect output :to-match ":heart: 1"))))
+        ;; count is preceded by a zero-width space (\u200B), not a regular space
+        (expect output :to-match ":thumbsup:\u200B3")
+        (expect output :to-match ":heart:\u200B1"))))
 
   (it "renders file attachments as links"
     (with-temp-buffer
@@ -302,7 +303,9 @@
       (slacko-render--insert-reactions
        '(((name . "fire") (count . 5))
          ((name . "100") (count . 2))))
-      (expect (buffer-string) :to-equal ":fire: 5  :100: 2\n")))
+      ;; count is preceded by a zero-width space (\u200B) with display properties
+      (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+        (expect text :to-equal ":fire:\u200B5  :100:\u200B2\n"))))
 
   (it "does nothing for nil reactions"
     (with-temp-buffer

@@ -235,7 +235,9 @@
                                     (paging . ((page . 1)
                                               (pages . 1)))))
                        (query . "test"))))
-      ;; Stub mention resolution to avoid API calls
+      ;; Stub to avoid API calls
+      (spy-on 'slacko--enrich-matches-with-reactions :and-call-fake
+              (lambda (matches) matches))
       (spy-on 'slacko-render-resolve-user-mentions :and-call-fake
               (lambda (_host text) text))
       (spy-on 'slacko-render-resolve-channel-mentions :and-call-fake
