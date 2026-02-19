@@ -39,6 +39,19 @@
   :type 'string
   :group 'slack-thread)
 
+(defcustom slack-thread-inline-images t
+  "Whether to display images inline in thread buffers.
+When non-nil, image files are downloaded and shown inline.
+When nil, images are shown as regular file links."
+  :type 'boolean
+  :group 'slack-thread)
+
+(defcustom slack-thread-image-max-width 480
+  "Maximum width in pixels for inline images.
+Images wider than this will be scaled down."
+  :type 'integer
+  :group 'slack-thread)
+
 ;;; URL Parsing
 
 (defconst slack-thread--url-regexp
@@ -173,6 +186,50 @@ Results are cached in `slack-thread--user-cache'."
        text)
     text))
 
+;;; Images
+
+(defun slack-thread--image-url-for-file (file)
+  "Return the best thumbnail URL for FILE, or nil if not an image.
+Prefers thumb_480, falls back to thumb_360, then url_private."
+  (let ((mimetype (alist-get 'mimetype file)))
+    (when (and mimetype (string-prefix-p "image/" mimetype))
+      (or (alist-get 'thumb_480 file)
+          (alist-get 'thumb_360 file)
+          (alist-get 'thumb_720 file)
+          (alist-get 'url_private file)))))
+
+(defun slack-thread--download-image (url host)
+  "Download image at URL using credentials for HOST.
+Returns image data as a string, or nil on failure."
+  (let* ((token (slack-creds-get host "token"))
+         (cookie (slack-creds-get host "cookie"))
+         (url-request-method "GET")
+         (url-request-extra-headers
+          `(("Authorization" . ,(format "Bearer %s" token))
+            ("Cookie" . ,(format "d=%s;" cookie))))
+         (url-cookie-storage nil)
+         (url-cookie-secure-storage nil)
+         (buf (url-retrieve-synchronously url t nil 15)))
+    (when buf
+      (unwind-protect
+          (with-current-buffer buf
+            (goto-char (point-min))
+            (when (re-search-forward "\r?\n\r?\n" nil t)
+              (buffer-substring-no-properties (point) (point-max))))
+        (kill-buffer buf)))))
+
+(defun slack-thread--insert-image (file host)
+  "Insert an inline image for FILE using credentials for HOST.
+Returns non-nil if the image was successfully inserted."
+  (when-let* ((img-url (slack-thread--image-url-for-file file))
+              (data (slack-thread--download-image img-url host))
+              (img (create-image data nil t
+                                 :max-width slack-thread-image-max-width
+                                 :scale 1.0)))
+    (insert-image img (format "[%s]" (or (alist-get 'name file) "image")))
+    (insert "\n")
+    t))
+
 ;;; Display
 
 (defun slack-thread--format-timestamp (ts)
@@ -210,10 +267,19 @@ CHANNEL-ID is the channel.  LEVEL is the org heading level (1 or 2)."
       (dolist (file files)
         (let ((name (alist-get 'name file))
               (url (alist-get 'url_private file))
-              (ptype (alist-get 'pretty_type file)))
-          (insert (format "- [[%s][%s]]%s\n"
-                          (or url "") (or name "file")
-                          (if ptype (format " (%s)" ptype) ""))))))
+              (ptype (alist-get 'pretty_type file))
+              (mimetype (alist-get 'mimetype file)))
+          ;; Try inline image first for image files
+          (if (and slack-thread-inline-images
+                   mimetype
+                   (string-prefix-p "image/" mimetype)
+                   (slack-thread--insert-image file host))
+              ;; Add a small link below the image for reference
+              (insert (format "  /[[%s][%s]]/\n" (or url "") (or name "file")))
+            ;; Fallback: regular link
+            (insert (format "- [[%s][%s]]%s\n"
+                            (or url "") (or name "file")
+                            (if ptype (format " (%s)" ptype) "")))))))
     ;; Reactions
     (when reactions
       (insert (mapconcat
