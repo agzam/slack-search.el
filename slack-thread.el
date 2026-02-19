@@ -177,13 +177,51 @@ Results are cached in `slack-thread--user-cache'."
 (defun slack-thread--resolve-user-mentions (host text)
   "Replace <@USER_ID> mentions in TEXT with display names for HOST."
   (if (and text (string-match-p "<@U[A-Z0-9]+>" text))
-      (replace-regexp-in-string
-       "<@\\(U[A-Z0-9]+\\)>"
-       (lambda (match)
-         (let* ((uid (match-string 1 match))
-                (name (slack-thread--resolve-user host uid)))
-           (format "@%s" name)))
-       text)
+      (let ((result text))
+        (while (string-match "<@\\(U[A-Z0-9]+\\)>" result)
+          (let* ((uid (match-string 1 result))
+                 (name (save-match-data
+                         (slack-thread--resolve-user host uid)))
+                 (replacement (format "@%s" name)))
+            (setq result (replace-match replacement t t result))))
+        result)
+    text))
+
+;;; Channel Resolution
+
+(defvar slack-thread--channel-cache (make-hash-table :test 'equal)
+  "Cache of channel-id -> channel-name, keyed as \"host:channel-id\".")
+
+(defun slack-thread--resolve-channel (host channel-id)
+  "Resolve CHANNEL-ID to a channel name for workspace HOST.
+Results are cached in `slack-thread--channel-cache'."
+  (let ((cache-key (format "%s:%s" host channel-id)))
+    (or (gethash cache-key slack-thread--channel-cache)
+        (let* ((resp (slack-thread--api-request
+                      host "conversations.info"
+                      `((channel ,channel-id))))
+               (channel (alist-get 'channel resp))
+               (name (or (alist-get 'name channel) channel-id)))
+          (puthash cache-key name slack-thread--channel-cache)
+          name))))
+
+(defun slack-thread--resolve-channel-mentions (host text)
+  "Replace <#CHANNEL_ID|name> mentions in TEXT with #channel-name.
+When name is provided after the pipe, use it directly.
+Otherwise, resolve via API (cached)."
+  (if (and text (string-match-p "<#C[A-Z0-9]+|" text))
+      (let ((result text))
+        (while (string-match "<#\\(C[A-Z0-9]+\\)|\\([^>]*\\)>" result)
+          (let* ((cid (match-string 1 result))
+                 (inline-name (match-string 2 result))
+                 (name (if (and inline-name (not (string-empty-p inline-name)))
+                           inline-name
+                         (save-match-data
+                           (slack-thread--resolve-channel host cid))))
+                 (replacement (format "[[slack://%s/archives/%s][#%s]]"
+                                      host cid name)))
+            (setq result (replace-match replacement t t result))))
+        result)
     text))
 
 ;;; Images
@@ -251,6 +289,7 @@ CHANNEL-ID is the channel.  LEVEL is the org heading level (1 or 2)."
          (timestamp (slack-thread--format-timestamp ts))
          (text (alist-get 'text msg))
          (text (slack-thread--resolve-user-mentions host text))
+         (text (slack-thread--resolve-channel-mentions host text))
          (text (if text (slack-mrkdwn-to-org text) ""))
          (files (alist-get 'files msg))
          (reactions (alist-get 'reactions msg))
