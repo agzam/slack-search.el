@@ -1,4 +1,4 @@
-;;; slack-thread.el --- Capture Slack threads -*- lexical-binding: t; -*-
+;;; slacko-thread.el --- Capture Slack threads -*- lexical-binding: t; -*-
 ;;
 ;; Copyright (C) 2025 Ag Ibragimov
 ;;
@@ -7,8 +7,7 @@
 ;; Created: February 17, 2026
 ;; Version: 0.0.1
 ;; Keywords: tools
-;; Homepage: https://github.com/agzam/slack-search
-;; Package-Requires: ((emacs "30.2"))
+;; Homepage: https://github.com/agzam/slacko
 ;;
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;;
@@ -17,44 +16,44 @@
 ;;; Commentary:
 ;;
 ;; Fetch and display Slack messages and threads given a Slack URL.
-;; Works with `slack-creds' for workspace-aware authentication.
+;; Works with `slacko-creds' for workspace-aware authentication.
 ;;
 ;;; Code:
 
 (require 'url)
 (require 'json)
 (require 'org)
-(require 'slack-mrkdwn)
-(require 'slack-creds)
+(require 'slacko-mrkdwn)
+(require 'slacko-creds)
 
 ;;; Customizable Variables
 
-(defgroup slack-thread nil
+(defgroup slacko-thread nil
   "Fetch and display Slack threads."
   :group 'tools
-  :prefix "slack-thread-")
+  :prefix "slacko-thread-")
 
-(defcustom slack-thread-buffer-name "*Slack Thread*"
+(defcustom slacko-thread-buffer-name "*Slack Thread*"
   "Name of the buffer to display captured threads."
   :type 'string
-  :group 'slack-thread)
+  :group 'slacko-thread)
 
-(defcustom slack-thread-inline-images t
+(defcustom slacko-thread-inline-images t
   "Whether to display images inline in thread buffers.
 When non-nil, image files are downloaded and shown inline.
 When nil, images are shown as regular file links."
   :type 'boolean
-  :group 'slack-thread)
+  :group 'slacko-thread)
 
-(defcustom slack-thread-image-max-width 480
+(defcustom slacko-thread-image-max-width 480
   "Maximum width in pixels for inline images.
 Images wider than this will be scaled down."
   :type 'integer
-  :group 'slack-thread)
+  :group 'slacko-thread)
 
 ;;; URL Parsing
 
-(defconst slack-thread--url-regexp
+(defconst slacko-thread--url-regexp
   (rx "https://" (group (+ (not "/"))) ".slack.com"
       "/archives/" (group (+ (not "/")))
       "/p" (group (+ digit))
@@ -62,10 +61,10 @@ Images wider than this will be scaled down."
   "Regexp matching a Slack message URL.
 Groups: 1=workspace, 2=channel-id, 3=raw-timestamp.")
 
-(defun slack-thread--parse-url (url)
+(defun slacko-thread--parse-url (url)
   "Parse a Slack message URL into its components.
 Returns a plist (:workspace :channel-id :ts :thread-ts) or nil."
-  (when (and url (string-match slack-thread--url-regexp url))
+  (when (and url (string-match slacko-thread--url-regexp url))
     (let* ((workspace (match-string 1 url))
            (channel-id (match-string 2 url))
            (raw-ts (match-string 3 url))
@@ -79,26 +78,26 @@ Returns a plist (:workspace :channel-id :ts :thread-ts) or nil."
             :ts ts
             :thread-ts thread-ts))))
 
-(defun slack-thread--detect-url ()
+(defun slacko-thread--detect-url ()
   "Detect a Slack URL from context.
 Checks: thing-at-point, then latest kill-ring entry."
   (or (when-let* ((url (thing-at-point 'url t)))
-        (when (string-match-p slack-thread--url-regexp url)
+        (when (string-match-p slacko-thread--url-regexp url)
           url))
       (when-let* ((clip (ignore-errors (current-kill 0 t))))
-        (when (string-match-p slack-thread--url-regexp clip)
+        (when (string-match-p slacko-thread--url-regexp clip)
           clip))))
 
 ;;; API Requests
 
-(defun slack-thread--api-request (host endpoint params)
+(defun slacko-thread--api-request (host endpoint params)
   "Make a synchronous Slack API request.
 HOST is the workspace domain (e.g. \"qlikdev.slack.com\").
 ENDPOINT is the API method (e.g. \"conversations.replies\").
 PARAMS is an alist of query parameters.
 Returns parsed JSON response or nil."
-  (let* ((token (slack-creds-get host "token"))
-         (cookie (slack-creds-get host "cookie"))
+  (let* ((token (slacko-creds-get host "token"))
+         (cookie (slacko-creds-get host "cookie"))
          (_ (unless token (error "No credentials for %s. Is this workspace logged in to the Slack app?" host)))
          (_ (unless cookie (error "No cookie for %s. Is this workspace logged in to the Slack app?" host)))
          (url-request-method "GET")
@@ -123,11 +122,11 @@ Returns parsed JSON response or nil."
                 (json-read))))
         (kill-buffer buf)))))
 
-(defun slack-thread--fetch-thread (host channel-id ts)
+(defun slacko-thread--fetch-thread (host channel-id ts)
   "Fetch a thread from Slack.
 Uses conversations.replies with TS as the thread parent.
 Returns the list of messages or nil."
-  (let* ((resp (slack-thread--api-request
+  (let* ((resp (slacko-thread--api-request
                 host "conversations.replies"
                 `((channel ,channel-id)
                   (ts ,ts)
@@ -137,11 +136,11 @@ Returns the list of messages or nil."
       (message "Slack API error: %s" (alist-get 'error resp))
       nil)))
 
-(defun slack-thread--fetch-single-message (host channel-id ts)
+(defun slacko-thread--fetch-single-message (host channel-id ts)
   "Fetch a single message from Slack.
 Uses conversations.history with TS.
 Returns a list containing the single message or nil."
-  (let* ((resp (slack-thread--api-request
+  (let* ((resp (slacko-thread--api-request
                 host "conversations.history"
                 `((channel ,channel-id)
                   (latest ,ts)
@@ -154,15 +153,15 @@ Returns a list containing the single message or nil."
 
 ;;; User Resolution
 
-(defvar slack-thread--user-cache (make-hash-table :test 'equal)
+(defvar slacko-thread--user-cache (make-hash-table :test 'equal)
   "Cache of user-id -> display-name, keyed as \"host:user-id\".")
 
-(defun slack-thread--resolve-user (host user-id)
+(defun slacko-thread--resolve-user (host user-id)
   "Resolve USER-ID to a display name for workspace HOST.
-Results are cached in `slack-thread--user-cache'."
+Results are cached in `slacko-thread--user-cache'."
   (let ((cache-key (format "%s:%s" host user-id)))
-    (or (gethash cache-key slack-thread--user-cache)
-        (let* ((resp (slack-thread--api-request
+    (or (gethash cache-key slacko-thread--user-cache)
+        (let* ((resp (slacko-thread--api-request
                       host "users.info"
                       `((user ,user-id))))
                (user (alist-get 'user resp))
@@ -171,17 +170,17 @@ Results are cached in `slack-thread--user-cache'."
                          (alist-get 'real_name user)
                          (alist-get 'name user)
                          user-id)))
-          (puthash cache-key name slack-thread--user-cache)
+          (puthash cache-key name slacko-thread--user-cache)
           name))))
 
-(defun slack-thread--resolve-user-mentions (host text)
+(defun slacko-thread--resolve-user-mentions (host text)
   "Replace <@USER_ID> mentions in TEXT with display names for HOST."
   (if (and text (string-match-p "<@U[A-Z0-9]+>" text))
       (let ((result text))
         (while (string-match "<@\\(U[A-Z0-9]+\\)>" result)
           (let* ((uid (match-string 1 result))
                  (name (save-match-data
-                         (slack-thread--resolve-user host uid)))
+                         (slacko-thread--resolve-user host uid)))
                  (replacement (format "@%s" name)))
             (setq result (replace-match replacement t t result))))
         result)
@@ -189,23 +188,23 @@ Results are cached in `slack-thread--user-cache'."
 
 ;;; Channel Resolution
 
-(defvar slack-thread--channel-cache (make-hash-table :test 'equal)
+(defvar slacko-thread--channel-cache (make-hash-table :test 'equal)
   "Cache of channel-id -> channel-name, keyed as \"host:channel-id\".")
 
-(defun slack-thread--resolve-channel (host channel-id)
+(defun slacko-thread--resolve-channel (host channel-id)
   "Resolve CHANNEL-ID to a channel name for workspace HOST.
-Results are cached in `slack-thread--channel-cache'."
+Results are cached in `slacko-thread--channel-cache'."
   (let ((cache-key (format "%s:%s" host channel-id)))
-    (or (gethash cache-key slack-thread--channel-cache)
-        (let* ((resp (slack-thread--api-request
+    (or (gethash cache-key slacko-thread--channel-cache)
+        (let* ((resp (slacko-thread--api-request
                       host "conversations.info"
                       `((channel ,channel-id))))
                (channel (alist-get 'channel resp))
                (name (or (alist-get 'name channel) channel-id)))
-          (puthash cache-key name slack-thread--channel-cache)
+          (puthash cache-key name slacko-thread--channel-cache)
           name))))
 
-(defun slack-thread--resolve-channel-mentions (host text)
+(defun slacko-thread--resolve-channel-mentions (host text)
   "Replace <#CHANNEL_ID|name> mentions in TEXT with #channel-name.
 When name is provided after the pipe, use it directly.
 Otherwise, resolve via API (cached)."
@@ -217,7 +216,7 @@ Otherwise, resolve via API (cached)."
                  (name (if (and inline-name (not (string-empty-p inline-name)))
                            inline-name
                          (save-match-data
-                           (slack-thread--resolve-channel host cid))))
+                           (slacko-thread--resolve-channel host cid))))
                  (replacement (format "[[slack://%s/archives/%s][#%s]]"
                                       host cid name)))
             (setq result (replace-match replacement t t result))))
@@ -226,7 +225,7 @@ Otherwise, resolve via API (cached)."
 
 ;;; Images
 
-(defun slack-thread--image-url-for-file (file)
+(defun slacko-thread--image-url-for-file (file)
   "Return the best thumbnail URL for FILE, or nil if not an image.
 Prefers thumb_480, falls back to thumb_360, then url_private."
   (let ((mimetype (alist-get 'mimetype file)))
@@ -236,11 +235,11 @@ Prefers thumb_480, falls back to thumb_360, then url_private."
           (alist-get 'thumb_720 file)
           (alist-get 'url_private file)))))
 
-(defun slack-thread--download-image (url host)
+(defun slacko-thread--download-image (url host)
   "Download image at URL using credentials for HOST.
 Returns image data as a string, or nil on failure."
-  (let* ((token (slack-creds-get host "token"))
-         (cookie (slack-creds-get host "cookie"))
+  (let* ((token (slacko-creds-get host "token"))
+         (cookie (slacko-creds-get host "cookie"))
          (url-request-method "GET")
          (url-request-extra-headers
           `(("Authorization" . ,(format "Bearer %s" token))
@@ -256,13 +255,13 @@ Returns image data as a string, or nil on failure."
               (buffer-substring-no-properties (point) (point-max))))
         (kill-buffer buf)))))
 
-(defun slack-thread--insert-image (file host)
+(defun slacko-thread--insert-image (file host)
   "Insert an inline image for FILE using credentials for HOST.
 Returns non-nil if the image was successfully inserted."
-  (when-let* ((img-url (slack-thread--image-url-for-file file))
-              (data (slack-thread--download-image img-url host))
+  (when-let* ((img-url (slacko-thread--image-url-for-file file))
+              (data (slacko-thread--download-image img-url host))
               (img (create-image data nil t
-                                 :max-width slack-thread-image-max-width
+                                 :max-width slacko-thread-image-max-width
                                  :scale 1.0)))
     (insert-image img (format "[%s]" (or (alist-get 'name file) "image")))
     (insert "\n")
@@ -270,27 +269,27 @@ Returns non-nil if the image was successfully inserted."
 
 ;;; Display
 
-(defun slack-thread--format-timestamp (ts)
+(defun slacko-thread--format-timestamp (ts)
   "Format a Slack timestamp TS into a human-readable string."
   (when (and ts (stringp ts))
     (ignore-errors
       (format-time-string "%Y-%m-%d %H:%M"
                           (seconds-to-time (string-to-number ts))))))
 
-(defun slack-thread--insert-message (msg host workspace channel-id level)
+(defun slacko-thread--insert-message (msg host workspace channel-id level)
   "Insert a single message MSG into the current buffer.
 HOST is the workspace domain.  WORKSPACE is the short name.
 CHANNEL-ID is the channel.  LEVEL is the org heading level (1 or 2)."
   (let* ((user-id (alist-get 'user msg))
          (author (if user-id
-                     (slack-thread--resolve-user host user-id)
+                     (slacko-thread--resolve-user host user-id)
                    "Unknown"))
          (ts (alist-get 'ts msg))
-         (timestamp (slack-thread--format-timestamp ts))
+         (timestamp (slacko-thread--format-timestamp ts))
          (text (alist-get 'text msg))
-         (text (slack-thread--resolve-user-mentions host text))
-         (text (slack-thread--resolve-channel-mentions host text))
-         (text (if text (slack-mrkdwn-to-org text) ""))
+         (text (slacko-thread--resolve-user-mentions host text))
+         (text (slacko-thread--resolve-channel-mentions host text))
+         (text (if text (slacko-mrkdwn-to-org text) ""))
          (files (alist-get 'files msg))
          (reactions (alist-get 'reactions msg))
          (stars (make-string level ?*))
@@ -309,10 +308,10 @@ CHANNEL-ID is the channel.  LEVEL is the org heading level (1 or 2)."
               (ptype (alist-get 'pretty_type file))
               (mimetype (alist-get 'mimetype file)))
           ;; Try inline image first for image files
-          (if (and slack-thread-inline-images
+          (if (and slacko-thread-inline-images
                    mimetype
                    (string-prefix-p "image/" mimetype)
-                   (slack-thread--insert-image file host))
+                   (slacko-thread--insert-image file host))
               ;; Add a small link below the image for reference
               (insert (format "  /[[%s][%s]]/\n" (or url "") (or name "file")))
             ;; Fallback: regular link
@@ -328,11 +327,11 @@ CHANNEL-ID is the channel.  LEVEL is the org heading level (1 or 2)."
               "\n"))
     (insert "\n")))
 
-(defun slack-thread--display (messages host workspace channel-id url)
+(defun slacko-thread--display (messages host workspace channel-id url)
   "Display MESSAGES in an org buffer.
 HOST is the full domain.  WORKSPACE is the short name.
 CHANNEL-ID and URL are for context."
-  (let ((buf (get-buffer-create slack-thread-buffer-name))
+  (let ((buf (get-buffer-create slacko-thread-buffer-name))
         (parent (car messages))
         (replies (cdr messages)))
     (with-current-buffer buf
@@ -342,35 +341,35 @@ CHANNEL-ID and URL are for context."
         (insert (format "#+SOURCE: %s\n" url))
         (insert (format "#+DATE: %s\n\n" (format-time-string "%Y-%m-%d %H:%M:%S")))
         ;; Parent message
-        (slack-thread--insert-message parent host workspace channel-id 1)
+        (slacko-thread--insert-message parent host workspace channel-id 1)
         ;; Replies
         (dolist (reply replies)
-          (slack-thread--insert-message reply host workspace channel-id 2)))
-      (unless (eq major-mode 'slack-thread-mode)
-        (slack-thread-mode))
+          (slacko-thread--insert-message reply host workspace channel-id 2)))
+      (unless (eq major-mode 'slacko-thread-mode)
+        (slacko-thread-mode))
       (goto-char (point-min)))
     (switch-to-buffer buf)))
 
 ;;; Major Mode
 
-(defvar slack-thread-mode-map
+(defvar slacko-thread-mode-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map org-mode-map)
     map)
-  "Keymap for `slack-thread-mode'.")
+  "Keymap for `slacko-thread-mode'.")
 
-(define-derived-mode slack-thread-mode org-mode "Slack-Thread"
+(define-derived-mode slacko-thread-mode org-mode "Slack-Thread"
   "Major mode for displaying a captured Slack thread.
 Derived from `org-mode'.
-\\{slack-thread-mode-map}"
+\\{slacko-thread-mode-map}"
   (setq buffer-read-only t)
   ;; Blockquote highlighting
-  (font-lock-add-keywords nil slack-mrkdwn-font-lock-keywords))
+  (font-lock-add-keywords nil slacko-mrkdwn-font-lock-keywords))
 
 ;;; Interactive Commands
 
 ;;;###autoload
-(defun slack-thread-capture (&optional url)
+(defun slacko-thread-capture (&optional url)
   "Capture a Slack message or thread and display it in an org buffer.
 
 URL resolution order:
@@ -383,9 +382,9 @@ If the message is a thread parent, the full thread is fetched.
 If it's a standalone message, just that message is shown."
   (interactive)
   (let* ((url (or url
-                  (slack-thread--detect-url)
+                  (slacko-thread--detect-url)
                   (user-error "No Slack URL found at point or in kill-ring")))
-         (parsed (slack-thread--parse-url url))
+         (parsed (slacko-thread--parse-url url))
          (_ (unless parsed (user-error "Could not parse Slack URL: %s" url)))
          (workspace (plist-get parsed :workspace))
          (channel-id (plist-get parsed :channel-id))
@@ -395,14 +394,19 @@ If it's a standalone message, just that message is shown."
          ;; If URL has thread_ts, use that as the parent ts
          (parent-ts (or thread-ts ts)))
     (message "Fetching thread from %s..." host)
-    (let ((messages (slack-thread--fetch-thread host channel-id parent-ts)))
+    (let ((messages (slacko-thread--fetch-thread host channel-id parent-ts)))
       (if messages
-          (slack-thread--display messages host workspace channel-id url)
+          (slacko-thread--display messages host workspace channel-id url)
         ;; Fallback: try as single message
-        (let ((single (slack-thread--fetch-single-message host channel-id ts)))
+        (let ((single (slacko-thread--fetch-single-message host channel-id ts)))
           (if single
-              (slack-thread--display single host workspace channel-id url)
+              (slacko-thread--display single host workspace channel-id url)
             (user-error "Could not fetch message from %s" url)))))))
 
-(provide 'slack-thread)
-;;; slack-thread.el ends here
+(provide 'slacko-thread)
+
+;; Local Variables:
+;; package-lint-main-file: "slacko.el"
+;; End:
+
+;;; slacko-thread.el ends here

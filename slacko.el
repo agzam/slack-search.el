@@ -1,4 +1,4 @@
-;;; slack-search.el --- Search in Slack -*- lexical-binding: t; -*-
+;;; slacko.el --- Search in Slack -*- lexical-binding: t; -*-
 ;;
 ;; Copyright (C) 2025 Ag Ibragimov
 ;;
@@ -8,7 +8,7 @@
 ;; Modified: January 20, 2025
 ;; Version: 0.0.2
 ;; Keywords: tools
-;; Homepage: https://github.com/agzam/slack-search
+;; Homepage: https://github.com/agzam/slacko
 ;; Package-Requires: ((emacs "30.2"))
 ;;
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -16,7 +16,7 @@
 ;; This file is not part of GNU Emacs.
 ;;
 ;;; Commentary:
-;;  Search in Slack
+;;  El Slacko - a Slack reader for Emacs
 ;;  
 ;;
 ;;; Code:
@@ -24,116 +24,116 @@
 (require 'url)
 (require 'json)
 (require 'org)
-(require 'slack-mrkdwn)
+(require 'slacko-mrkdwn)
 
 ;;; Customizable Variables
 
-(defgroup slack-search nil
+(defgroup slacko nil
   "Search Slack messages."
   :group 'tools
-  :prefix "slack-search-")
+  :prefix "slacko-")
 
-(defcustom slack-search-token-function nil
+(defcustom slacko-token-function nil
   "Function that returns the Slack API token.
 Should return a string containing the Bearer token."
   :type 'function
-  :group 'slack-search)
+  :group 'slacko)
 
-(defcustom slack-search-cookie-function nil
+(defcustom slacko-cookie-function nil
   "Function that returns the Slack cookie.
 Should return a string containing the `d' cookie value."
   :type 'function
-  :group 'slack-search)
+  :group 'slacko)
 
-(defcustom slack-search-buffer-name "*Slack Search*"
+(defcustom slacko-search-buffer-name "*Slack Search*"
   "Name of the buffer to display search results."
   :type 'string
-  :group 'slack-search)
+  :group 'slacko)
 
-(defcustom slack-search-results-per-page 20
+(defcustom slacko-search-results-per-page 20
   "Number of results to fetch per page."
   :type 'integer
-  :group 'slack-search)
+  :group 'slacko)
 
-(defcustom slack-search-inhibit-redirect-browser-tab t
+(defcustom slacko-inhibit-redirect-browser-tab t
   "Whether to close the redirect browser tab after opening Slack link.
 When non-nil, automatically close the browser tab that Slack opens
 for redirection after the link opens in the Slack app.  This prevents
 lingering useless tabs in your browser.  Only works on macOS."
   :type 'boolean
-  :group 'slack-search)
+  :group 'slacko)
 
-(defcustom slack-search-browser-name "Brave Browser"
+(defcustom slacko-browser-name "Brave Browser"
   "Name of the browser application to close tabs in.
 Common values: \"Brave Browser\", \"Google Chrome\", \"Safari\".
-Only used when `slack-search-inhibit-redirect-browser-tab' is non-nil."
+Only used when `slacko-inhibit-redirect-browser-tab' is non-nil."
   :type 'string
-  :group 'slack-search)
+  :group 'slacko)
 
-(defcustom slack-search-close-tab-delay 0.5
+(defcustom slacko-close-tab-delay 0.5
   "Delay in seconds before closing the browser tab after opening Slack link.
-Only used when `slack-search-inhibit-redirect-browser-tab' is non-nil."
+Only used when `slacko-inhibit-redirect-browser-tab' is non-nil."
   :type 'number
-  :group 'slack-search)
+  :group 'slacko)
 
 ;;; Internal Variables
 
-(defvar slack-search--current-query nil
+(defvar slacko--current-query nil
   "The current search query.")
 
-(defvar slack-search--current-page 1
+(defvar slacko--current-page 1
   "Current page number for pagination.")
 
-(defvar slack-search--total-pages nil
+(defvar slacko--total-pages nil
   "Total number of pages available.")
 
-(defvar slack-search--loading nil
+(defvar slacko--loading nil
   "Flag indicating if a search is currently loading.")
 
 ;;; Org-mode Link Handler
 
-(defun slack-search--follow-link (path)
+(defun slacko--follow-link (path)
   "Open Slack link from PATH and close browser tab.
 PATH should be the part after slack:// prefix."
   (let ((url (concat "https:" path)))
     ;; Open the URL (which will redirect to Slack app)
     (browse-url url)
     ;; Close the browser tab after a delay (macOS only)
-    (when (and slack-search-inhibit-redirect-browser-tab
+    (when (and slacko-inhibit-redirect-browser-tab
                (eq system-type 'darwin))
-      (run-at-time slack-search-close-tab-delay nil
+      (run-at-time slacko-close-tab-delay nil
                    (lambda ()
                      (let ((jxa-script (format "Application('%s').windows[0].activeTab.close(); Application('Slack').activate();"
-                                               slack-search-browser-name)))
+                                               slacko-browser-name)))
                        (shell-command (format "osascript -l JavaScript -e \"%s\"" jxa-script))))))))
 
 ;; Register the slack:// link type with org-mode
 (org-link-set-parameters
  "slack"
- :follow #'slack-search--follow-link)
+ :follow #'slacko--follow-link)
 
 ;;; Helper Functions
 
 
 
-(defun slack-search--get-token ()
+(defun slacko--get-token ()
   "Get the Slack API token."
-  (if slack-search-token-function
-      (funcall slack-search-token-function)
-    (error "`slack-search-token-function` is not set")))
+  (if slacko-token-function
+      (funcall slacko-token-function)
+    (error "`slacko-token-function` is not set")))
 
-(defun slack-search--get-cookie ()
+(defun slacko--get-cookie ()
   "Get the Slack cookie."
-  (if slack-search-cookie-function
-      (funcall slack-search-cookie-function)
-    (error "`slack-search-cookie-function` is not set")))
+  (if slacko-cookie-function
+      (funcall slacko-cookie-function)
+    (error "`slacko-cookie-function` is not set")))
 
-(defun slack-search--make-request (query page callback)
+(defun slacko--make-request (query page callback)
   "Send a search request to Slack API for QUERY at PAGE.
 Call CALLBACK with the parsed JSON response."
   (let* ((url-request-method "GET")
-         (token (slack-search--get-token))
-         (cookie (slack-search--get-cookie))
+         (token (slacko--get-token))
+         (cookie (slacko--get-cookie))
          (url-request-extra-headers
           `(("Authorization" . ,(format "Bearer %s" token))
             ("Cookie" . ,(format "d=%s; " cookie))
@@ -141,7 +141,7 @@ Call CALLBACK with the parsed JSON response."
          (query-params
           (url-build-query-string
            `((query ,query)
-             (count ,(number-to-string slack-search-results-per-page))
+             (count ,(number-to-string slacko-search-results-per-page))
              (page ,(number-to-string page)))))
          (url (format "https://slack.com/api/search.messages?%s" query-params))
          ;; Prevent url-retrieve from adding cookies automatically
@@ -171,7 +171,7 @@ Call CALLBACK with the parsed JSON response."
                (funcall callback response))))))
      nil t)))
 
-(defun slack-search--parse-result (match)
+(defun slacko--parse-result (match)
   "Parse a single search result MATCH into display format."
   (let* ((username (alist-get 'username match))
          (user-id (alist-get 'user match))
@@ -241,11 +241,11 @@ Call CALLBACK with the parsed JSON response."
           :timestamp (if (stringp timestamp) timestamp "unknown date")
           :permalink (if (stringp permalink) permalink "")
           :thread thread-info
-          :text (if (stringp content-text) (slack-mrkdwn-to-org content-text) "")
+          :text (if (stringp content-text) (slacko-mrkdwn-to-org content-text) "")
           :attachment-info attachment-info
           :files files-info)))
 
-(defun slack-search--insert-result (result)
+(defun slacko--insert-result (result)
   "Insert a single RESULT into the current buffer."
   (let* ((author (plist-get result :author))
          (user-id (plist-get result :user-id))
@@ -363,7 +363,7 @@ Call CALLBACK with the parsed JSON response."
                       text-str
                       (or files-str ""))))))
 
-(defun slack-search--display-results (response &optional append)
+(defun slacko--display-results (response &optional append)
   "Display search results from RESPONSE in `org-mode' buffer.
 If APPEND is non-nil, append to existing results."
   (let* ((ok (alist-get 'ok response))
@@ -377,7 +377,7 @@ If APPEND is non-nil, append to existing results."
     (if (not ok)
         (message "Slack search failed: %s" (alist-get 'error response))
       
-      (let ((buffer (get-buffer-create slack-search-buffer-name)))
+      (let ((buffer (get-buffer-create slacko-search-buffer-name)))
         (with-current-buffer buffer
         (let ((saved-point (when append (point)))
               (saved-window-start (when append
@@ -387,20 +387,20 @@ If APPEND is non-nil, append to existing results."
           (unless append
             (let ((inhibit-read-only t))
               (erase-buffer)
-              (insert (format "#+TITLE: Slack Search Results for: %s\n" slack-search--current-query))
+              (insert (format "#+TITLE: Slack Search Results for: %s\n" slacko--current-query))
               (insert (format "#+DATE: %s\n\n" (format-time-string "%Y-%m-%d %H:%M:%S")))
               (insert (format "Total results: %d\n\n" (or total 0)))))
           
           (let ((inhibit-read-only t))
             (goto-char (point-max))
             (dolist (match matches)
-              (slack-search--insert-result (slack-search--parse-result match)))
+              (slacko--insert-result (slacko--parse-result match)))
             
             ;; Indent the entire buffer properly
             (indent-region (point-min) (point-max)))
           
-          (setq slack-search--current-page page
-                slack-search--total-pages pages)
+          (setq slacko--current-page page
+                slacko--total-pages pages)
           
           ;; Restore position when appending, otherwise set up the buffer
           (if append
@@ -408,77 +408,75 @@ If APPEND is non-nil, append to existing results."
                 (when saved-point (goto-char saved-point))
                 (when saved-window-start
                   (set-window-start (get-buffer-window (current-buffer)) saved-window-start)))
-            (unless (eq major-mode 'slack-search-mode)
-              (slack-search-mode))
+            (unless (eq major-mode 'slacko-search-mode)
+              (slacko-search-mode))
             (goto-char (point-min)))
           
           ;; Load next page if available, but only after appending results
           ;; For the first page, don't auto-load to avoid race conditions
           (when (and append (< page pages))
-            (slack-search--load-next-page))))
+            (slacko--load-next-page))))
         
         ;; Switch to buffer AFTER all processing is complete
         (unless append
           (switch-to-buffer buffer)
           (set-window-start (selected-window) (point-min)))))))
 
-(defun slack-search--load-next-page ()
+(defun slacko--load-next-page ()
   "Load the next page of search results asynchronously."
-  (unless slack-search--loading
-    (setq slack-search--loading t)
-    (let ((next-page (1+ slack-search--current-page)))
-      ;; (message "Loading page %d of %d..." next-page slack-search--total-pages)
-      (slack-search--make-request
-       slack-search--current-query
+  (unless slacko--loading
+    (setq slacko--loading t)
+    (let ((next-page (1+ slacko--current-page)))
+      ;; (message "Loading page %d of %d..." next-page slacko--total-pages)
+      (slacko--make-request
+       slacko--current-query
        next-page
        (lambda (response)
-         (setq slack-search--loading nil)
-         (slack-search--display-results response t)
-         ;; (message "Loaded page %d of %d" slack-search--current-page slack-search--total-pages)
+         (setq slacko--loading nil)
+         (slacko--display-results response t)
+         ;; (message "Loaded page %d of %d" slacko--current-page slacko--total-pages)
          )))))
 
 ;;; Major Mode
 
-(defvar slack-search-mode-map
+(defvar slacko-search-mode-map
   (let ((map (make-sparse-keymap)))
     ;; Inherit from org-mode-map
     (set-keymap-parent map org-mode-map)
     ;; Add custom keybindings here if needed
-    ;; (define-key map (kbd "C-c C-n") #'slack-search-next-result)
-    ;; (define-key map (kbd "C-c C-p") #'slack-search-previous-result)
     map)
-  "Keymap for `slack-search-mode'.")
+  "Keymap for `slacko-search-mode'.")
 
-(define-derived-mode slack-search-mode org-mode "Slack-Search"
+(define-derived-mode slacko-search-mode org-mode "Slack-Search"
   "Major mode for displaying Slack search results.
 
 This mode is derived from `org-mode' and displays search results
 from Slack in an organized, readable format. Each result includes
 author, channel, timestamp, and message content with proper formatting.
 
-\\{slack-search-mode-map}"
+\\{slacko-search-mode-map}"
   ;; Set buffer to read-only by default
   (setq buffer-read-only t)
   ;; Blockquote highlighting
-  (font-lock-add-keywords nil slack-mrkdwn-font-lock-keywords))
+  (font-lock-add-keywords nil slacko-mrkdwn-font-lock-keywords))
 
 ;;; Interactive Commands
 
 ;;;###autoload
-(defun slack-search (query)
+(defun slacko-search (query)
   "Search Slack messages for QUERY.
 Display results in an `org-mode' buffer with pagination."
   (interactive "sSearch Slack: ")
-  (setq slack-search--current-query query
-        slack-search--current-page 1
-        slack-search--total-pages nil
-        slack-search--loading nil)
+  (setq slacko--current-query query
+        slacko--current-page 1
+        slacko--total-pages nil
+        slacko--loading nil)
   ;; (message "Searching Slack for: %s" query)
-  (slack-search--make-request
+  (slacko--make-request
    query
    1
    (lambda (response)
-     (slack-search--display-results response nil))))
+     (slacko--display-results response nil))))
 
-(provide 'slack-search)
-;;; slack-search.el ends here
+(provide 'slacko)
+;;; slacko.el ends here

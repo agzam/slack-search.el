@@ -1,4 +1,4 @@
-;;; slack-search-tests.el --- tests for slack-search.el -*- lexical-binding: t; -*-
+;;; slacko-tests.el --- tests for slacko -*- lexical-binding: t; -*-
 ;;
 ;; Copyright (C) 2025 Ag Ibragimov
 ;;
@@ -6,7 +6,7 @@
 ;; Maintainer: Ag Ibragimov <agzam.ibragimov@gmail.com>
 ;; Created: October 19, 2025
 ;; Keywords: tools tests
-;; Homepage: https://github.com/agzam/slack-search
+;; Homepage: https://github.com/agzam/slacko
 ;; Package-Requires: ((emacs "30.2"))
 ;;
 ;; This file is not part of GNU Emacs.
@@ -18,43 +18,43 @@
 ;;; Code:
 
 (require 'buttercup)
-(require 'slack-search)
+(require 'slacko)
 
-(describe "slack-search--follow-link"
+(describe "slacko--follow-link"
   (it "constructs correct https URL from slack path"
     (let* ((test-path "//workspace.slack.com/archives/C123/p456")
            (expected-url "https://workspace.slack.com/archives/C123/p456"))
       (spy-on 'browse-url)
-      (slack-search--follow-link test-path)
+      (slacko--follow-link test-path)
       (expect 'browse-url :to-have-been-called-with expected-url)))
 
   (it "does not close tab when inhibit is nil"
-    (let ((slack-search-inhibit-redirect-browser-tab nil)
+    (let ((slacko-inhibit-redirect-browser-tab nil)
           (test-path "//workspace.slack.com/archives/C123/p456"))
       (spy-on 'browse-url)
       (spy-on 'run-at-time)
-      (slack-search--follow-link test-path)
+      (slacko--follow-link test-path)
       (expect 'run-at-time :not :to-have-been-called)))
 
   (it "schedules tab close on macOS when inhibit is true"
-    (let ((slack-search-inhibit-redirect-browser-tab t)
+    (let ((slacko-inhibit-redirect-browser-tab t)
           (system-type 'darwin)
           (test-path "//workspace.slack.com/archives/C123/p456"))
       (spy-on 'browse-url)
       (spy-on 'run-at-time)
-      (slack-search--follow-link test-path)
+      (slacko--follow-link test-path)
       (expect 'run-at-time :to-have-been-called)))
 
   (it "does not schedule tab close on non-macOS systems"
-    (let ((slack-search-inhibit-redirect-browser-tab t)
+    (let ((slacko-inhibit-redirect-browser-tab t)
           (system-type 'gnu/linux)
           (test-path "//workspace.slack.com/archives/C123/p456"))
       (spy-on 'browse-url)
       (spy-on 'run-at-time)
-      (slack-search--follow-link test-path)
+      (slacko--follow-link test-path)
       (expect 'run-at-time :not :to-have-been-called))))
 
-(describe "slack-search--parse-result"
+(describe "slacko--parse-result"
   (it "parses basic channel message"
     (let* ((match `((username . "john_doe")
                     (user . "U123")
@@ -68,7 +68,7 @@
                     (ts . "1738226435.123456")
                     (permalink . "https://workspace.slack.com/archives/C456/p1738226435123456")
                     (thread_ts . nil)))
-           (result (slack-search--parse-result match)))
+           (result (slacko--parse-result match)))
       (expect (plist-get result :author) :to-equal "john_doe")
       (expect (plist-get result :user-id) :to-equal "U123")
       (expect (plist-get result :channel) :to-equal "general")
@@ -90,7 +90,7 @@
                     (ts . "1738226435.123456")
                     (permalink . "https://workspace.slack.com/archives/D123/p1738226435123456")
                     (thread_ts . nil)))
-           (result (slack-search--parse-result match)))
+           (result (slacko--parse-result match)))
       (expect (plist-get result :conversation-type) :to-equal "DM")))
 
   (it "identifies Group DM conversation type"
@@ -106,7 +106,7 @@
                     (ts . "1738226435.123456")
                     (permalink . "https://workspace.slack.com/archives/G456/p1738226435123456")
                     (thread_ts . nil)))
-           (result (slack-search--parse-result match)))
+           (result (slacko--parse-result match)))
       (expect (plist-get result :conversation-type) :to-equal "Group DM")))
 
   (it "identifies Private Channel conversation type"
@@ -122,7 +122,7 @@
                     (ts . "1738226435.123456")
                     (permalink . "https://workspace.slack.com/archives/G789/p1738226435123456")
                     (thread_ts . nil)))
-           (result (slack-search--parse-result match)))
+           (result (slacko--parse-result match)))
       (expect (plist-get result :conversation-type) :to-equal "Private Channel")))
 
   (it "handles missing username gracefully"
@@ -134,7 +134,7 @@
                                (is_channel . t)))
                     (ts . "1738226435.123456")
                     (permalink . "https://workspace.slack.com/archives/C456/p1738226435123456")))
-           (result (slack-search--parse-result match)))
+           (result (slacko--parse-result match)))
       (expect (plist-get result :author) :to-equal "Unknown")))
 
   (it "handles missing timestamp gracefully"
@@ -146,10 +146,10 @@
                                (is_channel . t)))
                     (ts . nil)
                     (permalink . "https://workspace.slack.com/archives/C456/p1738226435123456")))
-           (result (slack-search--parse-result match)))
+           (result (slacko--parse-result match)))
       (expect (plist-get result :timestamp) :to-equal "unknown date")))
 
-  (it "converts text using slack-mrkdwn-to-org"
+  (it "converts text using slacko-mrkdwn-to-org"
     (let* ((match `((username . "eve")
                     (user . "U333")
                     (text . "Check `code` here")
@@ -158,7 +158,7 @@
                                (is_channel . t)))
                     (ts . "1738226435.123456")
                     (permalink . "https://workspace.slack.com/archives/C456/p1738226435123456")))
-           (result (slack-search--parse-result match)))
+           (result (slacko--parse-result match)))
       (expect (plist-get result :text) :to-match "~code~")))
 
   (it "identifies thread messages"
@@ -171,10 +171,10 @@
                     (ts . "1738226435.123456")
                     (permalink . "https://workspace.slack.com/archives/C456/p1738226435123456")
                     (thread_ts . "1738226400.000000")))
-           (result (slack-search--parse-result match)))
+           (result (slacko--parse-result match)))
       (expect (plist-get result :thread) :to-equal "Thread"))))
 
-(describe "slack-search--insert-result"
+(describe "slacko--insert-result"
   (it "inserts formatted result with all links"
     (let* ((result '(:author "john_doe"
                      :user-id "U123"
@@ -187,7 +187,7 @@
                      :thread ""
                      :text "Hello world")))
       (with-temp-buffer
-        (slack-search--insert-result result)
+        (slacko--insert-result result)
         (let ((output (buffer-string)))
           ;; Check for author link
           (expect output :to-match "\\[\\[slack://workspace.slack.com/team/U123\\]\\[john_doe\\]\\]")
@@ -210,7 +210,7 @@
                      :thread ""
                      :text "Private message")))
       (with-temp-buffer
-        (slack-search--insert-result result)
+        (slacko--insert-result result)
         (let ((output (buffer-string)))
           ;; Check that DM is used instead of channel name
           (expect output :to-match "\\[\\[slack://workspace.slack.com/archives/D123\\]\\[DM\\]\\]")
@@ -228,7 +228,7 @@
                      :thread ""
                      :text "Message")))
       (with-temp-buffer
-        (slack-search--insert-result result)
+        (slacko--insert-result result)
         (let ((output (buffer-string)))
           ;; Should use plain author name without link
           (expect output :to-match "\\* bob |")
@@ -246,7 +246,7 @@
                      :thread ""
                      :text "Message")))
       (with-temp-buffer
-        (slack-search--insert-result result)
+        (slacko--insert-result result)
         (let ((output (buffer-string)))
           ;; Should use plain channel name without link (but permalink still has archives)
           (expect output :to-match "#general")
@@ -265,7 +265,7 @@
                      :thread ""
                      :text "Test message")))
       (with-temp-buffer
-        (slack-search--insert-result result)
+        (slacko--insert-result result)
         (let ((output (buffer-string)))
           ;; Check org heading starts with *
           (expect output :to-match "^\\*")
@@ -284,13 +284,13 @@
                      :thread ""
                      :text "Code: ~npm install~\n\n#+begin_src\nfunction test() {}\n#+end_src")))
       (with-temp-buffer
-        (slack-search--insert-result result)
+        (slacko--insert-result result)
         (let ((output (buffer-string)))
           ;; Check that formatted content is preserved
           (expect output :to-match "~npm install~")
           (expect output :to-match "#\\+begin_src"))))))
 
-(describe "slack-search--display-results"
+(describe "slacko--display-results"
   (it "handles successful response with matches"
     (let* ((response `((ok . t)
                        (messages . ((matches . (((username . "test")
@@ -305,8 +305,8 @@
                                     (paging . ((page . 1)
                                               (pages . 1)))))
                        (query . "test"))))
-      (slack-search--display-results response)
-      (with-current-buffer slack-search-buffer-name
+      (slacko--display-results response)
+      (with-current-buffer slacko-search-buffer-name
         (let ((content (buffer-string)))
           (expect content :to-match "#\\+TITLE: Slack Search Results")
           (expect content :to-match "Total results: 1")
@@ -318,8 +318,8 @@
                                     (total . 0)
                                     (paging . ((page . 1)
                                               (pages . 1))))))))
-      (slack-search--display-results response)
-      (with-current-buffer slack-search-buffer-name
+      (slacko--display-results response)
+      (with-current-buffer slacko-search-buffer-name
         (let ((content (buffer-string)))
           (expect content :to-match "Total results: 0")))))
 
@@ -327,8 +327,11 @@
     (let* ((response `((ok . nil)
                        (error . "invalid_auth"))))
       (spy-on 'message)
-      (slack-search--display-results response)
+      (slacko--display-results response)
       (expect 'message :to-have-been-called-with
               "Slack search failed: %s" "invalid_auth"))))
 
-;;; slack-search-tests.el ends here
+;; Local Variables:
+;; package-lint-main-file: "slacko.el"
+;; End:
+;;; slacko-tests.el ends here

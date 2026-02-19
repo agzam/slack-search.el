@@ -1,4 +1,4 @@
-;;; slack-mrkdwn.el --- Convert Slack mrkdwn to org-mode -*- lexical-binding: t; -*-
+;;; slacko-mrkdwn.el --- Convert Slack mrkdwn to org-mode -*- lexical-binding: t; -*-
 ;;
 ;; Copyright (C) 2025 Ag Ibragimov
 ;;
@@ -8,8 +8,7 @@
 ;; Modified: October 19, 2025
 ;; Version: 0.0.1
 ;; Keywords: tools
-;; Homepage: https://github.com/agzam/slack-search
-;; Package-Requires: ((emacs "30.2"))
+;; Homepage: https://github.com/agzam/slacko
 ;;
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;;
@@ -27,33 +26,33 @@
 
 ;;; Faces
 
-(defface slack-mrkdwn-blockquote-face
+(defface slacko-mrkdwn-blockquote-face
   '((((class color) (background light))
      :foreground "gray50" :slant italic :extend t)
     (((class color) (background dark))
      :foreground "gray60" :slant italic :extend t))
   "Face for blockquoted text in Slack messages."
-  :group 'slack-search)
+  :group 'slacko-search)
 
-(defface slack-mrkdwn-blockquote-bar-face
+(defface slacko-mrkdwn-blockquote-bar-face
   '((((class color) (background light))
      :foreground "gray70")
     (((class color) (background dark))
      :foreground "gray40"))
   "Face for the │ bar character in blockquotes."
-  :group 'slack-search)
+  :group 'slacko-search)
 
 ;;; Font-lock
 
-(defvar slack-mrkdwn-font-lock-keywords
+(defvar slacko-mrkdwn-font-lock-keywords
   `((,(rx bol (zero-or-more blank) (group "│") (group " " (zero-or-more nonl)))
-     (1 'slack-mrkdwn-blockquote-bar-face t)
-     (2 'slack-mrkdwn-blockquote-face t)))
+     (1 'slacko-mrkdwn-blockquote-bar-face t)
+     (2 'slacko-mrkdwn-blockquote-face t)))
   "Font-lock keywords for Slack mrkdwn elements.")
 
 ;;; Conversion Functions
 
-(defun slack-mrkdwn--convert-code-blocks (text)
+(defun slacko-mrkdwn--convert-code-blocks (text)
   "Convert Slack code blocks to org src blocks in TEXT.
 Handles blocks with or without language identifiers."
   (with-temp-buffer
@@ -85,7 +84,7 @@ Handles blocks with or without language identifiers."
         (insert replacement)))
     (buffer-string)))
 
-(defun slack-mrkdwn--convert-inline-code (text)
+(defun slacko-mrkdwn--convert-inline-code (text)
   "Convert inline code (`code`) to org verbatim (~code~) in TEXT."
   (with-temp-buffer
     (insert text)
@@ -95,7 +94,7 @@ Handles blocks with or without language identifiers."
       (replace-match "~\\1~" t))
     (buffer-string)))
 
-(defun slack-mrkdwn--convert-links (text)
+(defun slacko-mrkdwn--convert-links (text)
   "Convert Slack links to org links in TEXT.
 Converts both <url|text> and bare <url> formats."
   (with-temp-buffer
@@ -111,7 +110,7 @@ Converts both <url|text> and bare <url> formats."
       (replace-match "[[\\1]]" t))
     (buffer-string)))
 
-(defun slack-mrkdwn--convert-strikethrough (text)
+(defun slacko-mrkdwn--convert-strikethrough (text)
   "Convert Slack strikethrough (~text~) to org strikethrough (+text+) in TEXT."
   (with-temp-buffer
     (insert text)
@@ -120,14 +119,14 @@ Converts both <url|text> and bare <url> formats."
       (replace-match "+\\1+" t))
     (buffer-string)))
 
-(defun slack-mrkdwn--convert-blockquotes (text)
+(defun slacko-mrkdwn--convert-blockquotes (text)
   "Convert Slack blockquotes to org-mode quote lines in TEXT.
 Slack uses `&gt;' (HTML-encoded `>') at the start of a line for quotes.
 Converts to `│' prefix for a lightweight visual quote indicator."
   (replace-regexp-in-string
    "^&gt; ?" "│ " text))
 
-(defun slack-mrkdwn-to-org (text)
+(defun slacko-mrkdwn-to-org (text)
   "Convert Slack mrkdwn TEXT to `org-mode' format.
 
 This handles:
@@ -161,25 +160,28 @@ Not yet implemented:
              text-with-placeholders))
       
       ;; Process links (now code blocks are protected)
-      (setq text-with-placeholders (slack-mrkdwn--convert-links text-with-placeholders))
+      (setq text-with-placeholders (slacko-mrkdwn--convert-links text-with-placeholders))
 
       ;; Convert blockquotes (before restoring code blocks)
-      (setq text-with-placeholders (slack-mrkdwn--convert-blockquotes text-with-placeholders))
+      (setq text-with-placeholders (slacko-mrkdwn--convert-blockquotes text-with-placeholders))
 
       ;; Convert strikethrough ~text~ -> +text+ (before inline code, which also uses ~)
-      (setq text-with-placeholders (slack-mrkdwn--convert-strikethrough text-with-placeholders))
+      (setq text-with-placeholders (slacko-mrkdwn--convert-strikethrough text-with-placeholders))
       
       ;; Restore and convert code blocks
       (dolist (pair protected-blocks)
         (setq text-with-placeholders
               (replace-regexp-in-string
                (regexp-quote (car pair))
-               (slack-mrkdwn--convert-code-blocks (cdr pair))
+               (slacko-mrkdwn--convert-code-blocks (cdr pair))
                text-with-placeholders
                t t)))
       
       ;; Finally convert inline code
-      (slack-mrkdwn--convert-inline-code text-with-placeholders))))
+      (slacko-mrkdwn--convert-inline-code text-with-placeholders))))
 
-(provide 'slack-mrkdwn)
-;;; slack-mrkdwn.el ends here
+(provide 'slacko-mrkdwn)
+;; Local Variables:
+;; package-lint-main-file: "slacko.el"
+;; End:
+;;; slacko-mrkdwn.el ends here

@@ -1,4 +1,4 @@
-;;; slack-creds.el --- Extract Slack credentials from local app data -*- lexical-binding: t; -*-
+;;; slacko-creds.el --- Extract Slack credentials from local app data -*- lexical-binding: t; -*-
 ;;
 ;; Copyright (C) 2025 Ag Ibragimov
 ;;
@@ -7,8 +7,7 @@
 ;; Created: February 17, 2026
 ;; Version: 0.0.1
 ;; Keywords: tools
-;; Homepage: https://github.com/agzam/slack-search
-;; Package-Requires: ((emacs "30.2"))
+;; Homepage: https://github.com/agzam/slacko
 ;;
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;;
@@ -32,74 +31,74 @@
 
 ;;; Customizable Variables
 
-(defgroup slack-creds nil
+(defgroup slacko-creds nil
   "Slack credential extraction and caching."
   :group 'tools
-  :prefix "slack-creds-")
+  :prefix "slacko-creds-")
 
-(defcustom slack-creds-gpg-file
-  (expand-file-name ".slack-creds.gpg" user-emacs-directory)
+(defcustom slacko-creds-gpg-file
+  (expand-file-name ".slacko-creds.gpg" user-emacs-directory)
   "GPG-encrypted file to cache credentials in netrc format."
   :type 'file
-  :group 'slack-creds)
+  :group 'slacko-creds)
 
-(defcustom slack-creds-slack-data-dir
+(defcustom slacko-creds-slack-data-dir
   (pcase system-type
     ('darwin (expand-file-name "~/Library/Application Support/Slack/")))
   "Path to the Slack desktop app's data directory."
   :type 'directory
-  :group 'slack-creds)
+  :group 'slacko-creds)
 
-(defcustom slack-creds-keychain-service "Slack Safe Storage"
+(defcustom slacko-creds-keychain-service "Slack Safe Storage"
   "Keychain service name for the Slack cookie encryption key."
   :type 'string
-  :group 'slack-creds)
+  :group 'slacko-creds)
 
-(defcustom slack-creds-gpg-key nil
+(defcustom slacko-creds-gpg-key nil
   "GPG key ID to encrypt the credentials file.
 When nil, auto-detected from the default secret key."
   :type '(choice string (const nil))
-  :group 'slack-creds)
+  :group 'slacko-creds)
 
-(defun slack-creds--gpg-key ()
+(defun slacko-creds--gpg-key ()
   "Return the GPG key to use for encryption.
-Uses `slack-creds-gpg-key' if set, otherwise auto-detects."
-  (or slack-creds-gpg-key
+Uses `slacko-creds-gpg-key' if set, otherwise auto-detects."
+  (or slacko-creds-gpg-key
       (let ((output (string-trim
                      (shell-command-to-string
                       "gpg --list-secret-keys --keyid-format long 2>/dev/null | grep '^sec' | head -1 | sed 's|.*/\\([A-F0-9]*\\) .*|\\1|'"))))
         (if (string-empty-p output)
-            (error "No GPG secret key found. Set `slack-creds-gpg-key'")
+            (error "No GPG secret key found. Set `slacko-creds-gpg-key'")
           output))))
 
 ;;; Token extraction
 
-(defun slack-creds--extract-tokens ()
+(defun slacko-creds--extract-tokens ()
   "Extract xoxc tokens from the Slack app's data directory.
 Searches across Local Storage, IndexedDB, Service Worker caches,
 and other binary files.  Returns a list of unique token strings."
   (let* ((cmd (format "rg -aoN --no-filename 'xoxc-[A-Za-z0-9_-]+' %s 2>/dev/null | sort -u"
-                      (shell-quote-argument slack-creds-slack-data-dir)))
+                      (shell-quote-argument slacko-creds-slack-data-dir)))
          (output (string-trim (shell-command-to-string cmd))))
     (when (and output (not (string-empty-p output)))
       (split-string output "\n" t))))
 
 ;;; Cookie decryption (Cookies SQLite + Keychain + OpenSSL)
 
-(defun slack-creds--get-keychain-password ()
+(defun slacko-creds--get-keychain-password ()
   "Get the Slack Safe Storage password from macOS Keychain."
   (let ((output (string-trim
                  (shell-command-to-string
                   (format "security find-generic-password -s %s -w 2>/dev/null"
-                          (shell-quote-argument slack-creds-keychain-service))))))
+                          (shell-quote-argument slacko-creds-keychain-service))))))
     (if (string-empty-p output)
         (error "Could not retrieve Slack keychain password")
       output)))
 
-(defun slack-creds--decrypt-cookie ()
+(defun slacko-creds--decrypt-cookie ()
   "Decrypt the Slack `d' cookie from the Cookies SQLite database.
 Returns the cookie value string or nil."
-  (let* ((cookies-db (expand-file-name "Cookies" slack-creds-slack-data-dir))
+  (let* ((cookies-db (expand-file-name "Cookies" slacko-creds-slack-data-dir))
          (tmp-enc (make-temp-file "slack-cookie-" nil ".bin"))
          (tmp-dec (make-temp-file "slack-cookie-dec-" nil ".bin")))
     (unwind-protect
@@ -111,7 +110,7 @@ Returns the cookie value string or nil."
 
           (when (and (file-exists-p tmp-enc)
                      (> (file-attribute-size (file-attributes tmp-enc)) 0))
-            (let* ((pass (slack-creds--get-keychain-password))
+            (let* ((pass (slacko-creds--get-keychain-password))
                    ;; Derive AES key: PBKDF2(password, salt='saltysalt', iter=1003, SHA1, keylen=16)
                    (salt-hex "73616c747973616c74") ; "saltysalt" in hex
                    (key-hex (string-trim
@@ -141,7 +140,7 @@ Returns the cookie value string or nil."
 
 ;;; Workspace identification
 
-(defun slack-creds--identify-workspace (token cookie)
+(defun slacko-creds--identify-workspace (token cookie)
   "Call auth.test to identify which workspace TOKEN belongs to.
 COOKIE is the decrypted `d' cookie.  Returns an alist with
 team, team_id, user, url or nil on failure."
@@ -168,14 +167,14 @@ team, team_id, user, url or nil on failure."
 
 ;;; GPG file management
 
-(defun slack-creds--read-gpg-file ()
+(defun slacko-creds--read-gpg-file ()
   "Read the current contents of the credentials GPG file."
-  (when (file-exists-p slack-creds-gpg-file)
+  (when (file-exists-p slacko-creds-gpg-file)
     (with-temp-buffer
-      (insert-file-contents slack-creds-gpg-file)
+      (insert-file-contents slacko-creds-gpg-file)
       (buffer-string))))
 
-(defun slack-creds--update-gpg-entry (contents host login password)
+(defun slacko-creds--update-gpg-entry (contents host login password)
   "Update or add a netrc entry in CONTENTS for HOST, LOGIN with PASSWORD.
 Returns the updated string."
   (let* ((lines (split-string (or contents "") "\n" nil))
@@ -194,43 +193,43 @@ Returns the updated string."
             new-line
           (concat result "\n" new-line))))))
 
-(defun slack-creds--save-to-gpg (entries)
+(defun slacko-creds--save-to-gpg (entries)
   "Save credential ENTRIES to the GPG file.
 ENTRIES is a list of (host token cookie) triples."
-  (let ((contents (slack-creds--read-gpg-file)))
+  (let ((contents (slacko-creds--read-gpg-file)))
     (dolist (entry entries)
       (let ((host (nth 0 entry))
             (token (nth 1 entry))
             (cookie (nth 2 entry)))
-        (setq contents (slack-creds--update-gpg-entry contents host "token" token))
-        (setq contents (slack-creds--update-gpg-entry contents host "cookie" cookie))))
+        (setq contents (slacko-creds--update-gpg-entry contents host "token" token))
+        (setq contents (slacko-creds--update-gpg-entry contents host "cookie" cookie))))
     (unless (string-suffix-p "\n" contents)
       (setq contents (concat contents "\n")))
     ;; Write via gpg CLI directly - bypasses EPA and its dialogs
-    (let ((tmp (make-temp-file "slack-creds-" nil ".txt")))
+    (let ((tmp (make-temp-file "slacko-creds-" nil ".txt")))
       (unwind-protect
           (progn
             (with-temp-file tmp
               (insert contents))
             (set-file-modes tmp #o600)
-            (when (file-exists-p slack-creds-gpg-file)
-              (delete-file slack-creds-gpg-file))
+            (when (file-exists-p slacko-creds-gpg-file)
+              (delete-file slacko-creds-gpg-file))
             (let ((exit-code
                    (call-process
                     "gpg" nil nil nil
                     "--batch" "--yes" "--quiet"
-                    "--recipient" (slack-creds--gpg-key)
-                    "--output" (expand-file-name slack-creds-gpg-file)
+                    "--recipient" (slacko-creds--gpg-key)
+                    "--output" (expand-file-name slacko-creds-gpg-file)
                     "--encrypt" tmp)))
               (unless (zerop exit-code)
                 (error "gpg encrypt failed (exit %d)" exit-code))))
         (when (file-exists-p tmp)
           (delete-file tmp))))
-    (message "Slack credentials saved to %s" slack-creds-gpg-file)))
+    (message "Slack credentials saved to %s" slacko-creds-gpg-file)))
 
 ;;; Main entry point
 
-(defun slack-creds--clear-cache ()
+(defun slacko-creds--clear-cache ()
   "Clear auth-source cache for Slack credentials."
   (when (and (boundp 'auth-source-cache)
              (hash-table-p auth-source-cache))
@@ -244,14 +243,14 @@ ENTRIES is a list of (host token cookie) triples."
         (remhash k auth-source-cache)))))
 
 ;;;###autoload
-(defun slack-creds-refresh ()
+(defun slacko-creds-refresh ()
   "Extract Slack credentials from the local app and cache them.
 Reads tokens from LevelDB, decrypts the session cookie, identifies
 workspaces via auth.test, and saves to the GPG credentials file."
   (interactive)
   (message "Extracting Slack credentials...")
-  (let ((tokens (slack-creds--extract-tokens))
-        (cookie (slack-creds--decrypt-cookie))
+  (let ((tokens (slacko-creds--extract-tokens))
+        (cookie (slacko-creds--decrypt-cookie))
         (entries '()))
     (unless tokens
       (error "No tokens found in Slack's LevelDB"))
@@ -260,7 +259,7 @@ workspaces via auth.test, and saves to the GPG credentials file."
     (message "Found %d token(s), cookie decrypted. Identifying workspaces..."
              (length tokens))
     (dolist (token tokens)
-      (let ((ws (slack-creds--identify-workspace token cookie)))
+      (let ((ws (slacko-creds--identify-workspace token cookie)))
         (if ws
             (let* ((url (alist-get 'url ws))
                    ;; url is like "https://qlikdev.slack.com/"
@@ -273,18 +272,18 @@ workspaces via auth.test, and saves to the GPG credentials file."
                    (substring token -8)))))
     (if entries
         (progn
-          (slack-creds--save-to-gpg entries)
-          (slack-creds--clear-cache)
-          (setq slack-creds--last-refresh-time (current-time))
+          (slacko-creds--save-to-gpg entries)
+          (slacko-creds--clear-cache)
+          (setq slacko-creds--last-refresh-time (current-time))
           (message "Done. %d workspace(s) updated." (length entries)))
       (error "No valid credentials found"))))
 
-(defvar slack-creds--last-refresh-time nil
-  "Time of the last successful `slack-creds-refresh', or nil.")
+(defvar slacko-creds--last-refresh-time nil
+  "Time of the last successful `slacko-creds-refresh', or nil.")
 
-(defun slack-creds--auth-source-get (host kind)
+(defun slacko-creds--auth-source-get (host kind)
   "Look up credential for HOST and KIND from the GPG file via auth-source."
-  (let* ((auth-sources (list slack-creds-gpg-file))
+  (let* ((auth-sources (list slacko-creds-gpg-file))
          (auth-source-cache-expiry 0)
          (found (car (auth-source-search :host host :user kind :max 1))))
     (when found
@@ -293,19 +292,22 @@ workspaces via auth.test, and saves to the GPG credentials file."
             (funcall secret)
           secret)))))
 
-(defun slack-creds-get (host kind)
+(defun slacko-creds-get (host kind)
   "Get cached credential for HOST (e.g. \"qlikdev.slack.com\").
 KIND is either \"token\" or \"cookie\".
 Reads from the GPG credentials file via `auth-source'.
 If not found and credentials haven't been refreshed recently,
-automatically runs `slack-creds-refresh' and retries."
-  (or (slack-creds--auth-source-get host kind)
+automatically runs `slacko-creds-refresh' and retries."
+  (or (slacko-creds--auth-source-get host kind)
       ;; Only auto-refresh if we haven't done so in the last 60 seconds
-      (when (or (null slack-creds--last-refresh-time)
-                (> (float-time (time-subtract nil slack-creds--last-refresh-time)) 60))
+      (when (or (null slacko-creds--last-refresh-time)
+                (> (float-time (time-subtract nil slacko-creds--last-refresh-time)) 60))
         (message "No %s for %s, refreshing credentials..." kind host)
-        (slack-creds-refresh)
-        (slack-creds--auth-source-get host kind))))
+        (slacko-creds-refresh)
+        (slacko-creds--auth-source-get host kind))))
 
-(provide 'slack-creds)
-;;; slack-creds.el ends here
+(provide 'slacko-creds)
+;; Local Variables:
+;; package-lint-main-file: "slacko.el"
+;; End:
+;;; slacko-creds.el ends here

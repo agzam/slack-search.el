@@ -36,13 +36,13 @@ check-compile: deps
 	--eval "(package-initialize)" \
 	--eval "(setq byte-compile-error-on-warn t)" \
 	--eval "(add-to-list 'load-path \".\")" \
-	--eval "(byte-compile-file \"slack-mrkdwn.el\")" \
-	--eval "(byte-compile-file \"slack-search.el\")"
+	--eval "(byte-compile-file \"slacko-mrkdwn.el\")" \
+	--eval "(byte-compile-file \"slacko.el\")"
 
 compile:
 	@echo "Byte-compiling package files..."
-	emacs --batch --eval "(byte-compile-file \"slack-mrkdwn.el\")" \
-	--eval "(byte-compile-file \"slack-search.el\")"
+	emacs --batch --eval "(byte-compile-file \"slacko-mrkdwn.el\")" \
+	--eval "(byte-compile-file \"slacko.el\")"
 
 clean:
 	@echo "Cleaning compiled files..."
