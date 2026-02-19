@@ -3,6 +3,23 @@
 
 All notable changes to this project will be documented in this file.
 
+* [1.0.0] - 2026-02-19
+** Changed
+- Renamed project from ~slack-search~ to ~slacko~ (a.k.a. "El Slacko")
+- All symbol prefixes updated: ~slack-search-~ -> ~slacko-~, ~slack-mrkdwn-~ -> ~slacko-mrkdwn-~, ~slack-creds-~ -> ~slacko-creds-~, ~slack-thread-~ -> ~slacko-thread-~
+- Main entry point is now ~slacko-search~ (was ~slack-search~)
+
+** Added
+- Inline image display in thread buffers - images are downloaded and rendered directly
+- ~slacko-thread-inline-images~ and ~slacko-thread-image-max-width~ customization options
+- Channel mention resolution: ~<#CHANNEL_ID|>~ now displays as clickable ~#channel-name~ links
+- Strikethrough conversion: Slack's ~~text~~ now renders as org's ~+text+~
+- Blockquote conversion: ~&gt; text~ renders with ~│~ prefix and custom faces
+- ~slacko-mrkdwn-blockquote-face~ and ~slacko-mrkdwn-blockquote-bar-face~ for quote styling
+
+** Fixed
+- Match-data clobbering in user and channel mention resolution during API calls
+
 * [0.1.0] - 2026-02-17
 ** Added
 - slack-creds with functions to retrieve token from the registered slack app and keychain - Mac-only for now

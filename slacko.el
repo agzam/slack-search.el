@@ -6,7 +6,7 @@
 ;; Maintainer: Ag Ibragimov <agzam.ibragimov@gmail.com>
 ;; Created: October 18, 2025
 ;; Modified: January 20, 2025
-;; Version: 0.0.2
+;; Version: 1.0.0
 ;; Keywords: tools
 ;; Homepage: https://github.com/agzam/slacko
 ;; Package-Requires: ((emacs "30.2"))

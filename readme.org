@@ -1,9 +1,11 @@
-#+TITLE: slack-search
+#+TITLE: El Slacko - Emacs Slack assistant
 #+AUTHOR: Ag Ibragimov
 #+DATE: 2025
-[[https://github.com/agzam/slack-search.el/actions/workflows/run-tests.yml][https://github.com/agzam/slack-search.el/actions/workflows/run-tests.yml/badge.svg]]
+[[https://github.com/agzam/slacko.el/actions/workflows/run-tests.yml][https://github.com/agzam/slacko.el/actions/workflows/run-tests.yml/badge.svg]]
 
-Search Slack messages from Emacs and view results in org-mode buffer.
+#+HTML: <p align="center"><img src="./test/el-slacko-logo.png" alt="El Slacko logo"/></p>
+
+Search for, and read Slack messages in Emacs, viewing them in org-mode outline.
 
 [[file:./test/preview.gif]]
 
@@ -21,7 +23,7 @@ This package solves that problem by bringing Slack search into Emacs, where you 
 
 * What?
 
-~slack-search~ lets you search Slack messages and displays results in an org-mode buffer. Each result includes:
+~slacko~ lets you search Slack messages and displays results in an org-mode buffer. Each result includes:
 
 - Clickable author names, channel names, and timestamps
 - Message content with proper formatting:
@@ -64,20 +66,20 @@ Linux way coming soon.
 
 ** Configuration
 
-You need to tell ~slack-search~ how to access session token and 'd-cookie', they set in ~slack-search-token-function~ and ~slack-search-cookie-function~
+You need to tell ~slacko~ how to access session token and 'd-cookie', they set in ~slacko-token-function~ and ~slacko-cookie-function~
 
 Here's how you can grab them from a given netrc-format encrypted file:
 
 #+begin_src emacs-lisp
-(defun slack-search-creds-fn (kind)
+(defun slacko-creds-fn (kind)
   (let ((auth-sources `(,(expand-file-name "~/.doom.d/.secrets.gpg"))))
     (auth-source-pick-first-password :host "MYORG.slack.com" :user kind)))
 
-(setq slack-search-token-function
-      (lambda () (slack-search-creds-fn "token")))
+(setq slacko-token-function
+      (lambda () (slacko-creds-fn "token")))
 
-(setq slack-search-cookie-function
-      (lambda () (slack-search-creds-fn "cookie")))
+(setq slacko-cookie-function
+      (lambda () (slacko-creds-fn "cookie")))
 #+end_src
 
 ** Multiple Slack workspaces
@@ -85,17 +87,17 @@ Here's how you can grab them from a given netrc-format encrypted file:
 The Slack session token encodes which Slack org it belongs to, so if you want to use the package with multiple Slack workspaces, you'll need to switch credentials before searching. You could wrap the search command to set these dynamically, e.g., 
 
 #+begin_src emacs-lisp
-(defun my-slack-search-org1 ()
+(defun my-slacko-search-org1 ()
   (interactive)
-  (setq slack-search-token-function (lambda () (get-token-for "org1.slack.com")))
-  (setq slack-search-cookie-function (lambda () (get-cookie-for "org1.slack.com")))
-  (call-interactively #'slack-search))
+  (setq slacko-token-function (lambda () (get-token-for "org1.slack.com")))
+  (setq slacko-cookie-function (lambda () (get-cookie-for "org1.slack.com")))
+  (call-interactively #'slacko-search))
 
-(defun my-slack-search-org2 ()
+(defun my-slacko-search-org2 ()
   (interactive)
-  (setq slack-search-token-function (lambda () (get-token-for "org2.slack.com")))
-  (setq slack-search-cookie-function (lambda () (get-cookie-for "org2.slack.com")))
-  (call-interactively #'slack-search))
+  (setq slacko-token-function (lambda () (get-token-for "org2.slack.com")))
+  (setq slacko-cookie-function (lambda () (get-cookie-for "org2.slack.com")))
+  (call-interactively #'slacko-search))
 #+end_src
 
 ** Usage
@@ -103,7 +105,7 @@ The Slack session token encodes which Slack org it belongs to, so if you want to
 Once token and cookie retrieval configured, just run:
 
 #+begin_src emacs-lisp
-M-x slack-search
+M-x slacko-search
 #+end_src
 
 I'm in the process of adding more functionality, I just added a way for displaying messages and threads.
@@ -115,14 +117,14 @@ Slack notoriously (and quite stupidly) doesn't allow deep-linking directly to a 
 On mac, the package automatically closes that useless redirect tab. If you want to disable that:
 
 #+begin_src emacs-lisp
-(setq slack-search-inhibit-redirect-browser-tab nil)
+(setq slacko-inhibit-redirect-browser-tab nil)
 #+end_src
 
 You can also customize which browser it targets and the delay before closing the tab:
 
 #+begin_src emacs-lisp
-(setq slack-search-browser-name "Google Chrome")  ; or "Safari", etc.
-(setq slack-search-close-tab-delay 2.0)           ; seconds
+(setq slacko-browser-name "Google Chrome")  ; or "Safari", etc.
+(setq slacko-close-tab-delay 2.0)           ; seconds
 #+end_src
 
 * Changelog
