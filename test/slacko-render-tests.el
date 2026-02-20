@@ -54,7 +54,27 @@
 
   (it "returns plain name when author-id is nil"
     (expect (slacko-render--build-author-link "host" "John" nil)
-            :to-equal "John")))
+            :to-equal "John"))
+
+  (it "uses author-id when author is empty string"
+    (expect (slacko-render--build-author-link
+             "workspace.slack.com" "" "U123")
+            :to-equal
+            "[[slack://workspace.slack.com/team/U123][U123]]"))
+
+  (it "uses author-id when author is nil"
+    (expect (slacko-render--build-author-link
+             "workspace.slack.com" nil "U123")
+            :to-equal
+            "[[slack://workspace.slack.com/team/U123][U123]]"))
+
+  (it "falls back to Unknown when both author and author-id are nil"
+    (expect (slacko-render--build-author-link "host" nil nil)
+            :to-equal "Unknown"))
+
+  (it "falls back to Unknown when author is empty and no author-id"
+    (expect (slacko-render--build-author-link "host" "" nil)
+            :to-equal "Unknown")))
 
 ;;; Channel Link
 
@@ -273,6 +293,20 @@
          :level 1))
       (let ((output (buffer-string)))
         (expect output :to-match "Unknown"))))
+
+  (it "handles empty-string author by falling back to user ID"
+    (with-temp-buffer
+      (slacko-render-message
+       '(:author ""
+         :author-id "U026NQLSBLH"
+         :text "Message"
+         :ts "1738226435.123456"
+         :permalink "slack://host/p123"
+         :level 1
+         :host "host"))
+      (let ((output (buffer-string)))
+        (expect output :to-match "U026NQLSBLH")
+        (expect output :not :to-match "\\[\\]"))))
 
   (it "converts mrkdwn to org"
     (with-temp-buffer

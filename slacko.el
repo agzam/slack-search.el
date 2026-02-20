@@ -243,7 +243,8 @@ Returns parsed JSON response or nil."
          (files (alist-get 'files match))
          ;; Reactions
          (reactions (alist-get 'reactions match)))
-    (list :author (if (stringp username) username "Unknown")
+    (list :author (if (and (stringp username) (not (string-empty-p username)))
+                      username "Unknown")
           :author-id (when (stringp user-id) user-id)
           :text (or content-text "")
           :ts ts

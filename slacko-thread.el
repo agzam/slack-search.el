@@ -117,9 +117,11 @@ Returns a list containing the single message or nil."
 HOST is the workspace domain.  CHANNEL-ID is the channel.
 LEVEL is the org heading level (1 or 2)."
   (let* ((user-id (alist-get 'user msg))
-         (author (if user-id
-                     (slacko-render-resolve-user host user-id)
-                   "Unknown"))
+         (author (or (when user-id
+                       (let ((name (slacko-render-resolve-user host user-id)))
+                         (when (and (stringp name) (not (string-empty-p name)))
+                           name)))
+                     "Unknown"))
          (ts (alist-get 'ts msg))
          (text (alist-get 'text msg))
          (files (alist-get 'files msg))

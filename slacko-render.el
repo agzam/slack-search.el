@@ -55,20 +55,28 @@ See `format-time-string' for available format specifiers."
 (defvar slacko-render--user-cache (make-hash-table :test 'equal)
   "Cache of user-id -> display-name, keyed as \"host:user-id\".")
 
+(defun slacko-render--non-empty (s)
+  "Return S if it is a non-empty string, otherwise nil."
+  (when (and (stringp s) (not (string-empty-p s))) s))
+
 (defun slacko-render-resolve-user (host user-id)
   "Resolve USER-ID to a display name for workspace HOST.
 Results are cached.  Returns USER-ID if resolution fails."
   (let ((cache-key (format "%s:%s" host user-id)))
-    (or (gethash cache-key slacko-render--user-cache)
+    (or (slacko-render--non-empty
+         (gethash cache-key slacko-render--user-cache))
         (condition-case nil
             (let* ((resp (slacko-creds-api-request
                           host "users.info"
                           `((user ,user-id))))
                    (user (alist-get 'user resp))
                    (profile (alist-get 'profile user))
-                   (name (or (alist-get 'display_name profile)
-                             (alist-get 'real_name user)
-                             (alist-get 'name user)
+                   (name (or (slacko-render--non-empty
+                              (alist-get 'display_name profile))
+                             (slacko-render--non-empty
+                              (alist-get 'real_name user))
+                             (slacko-render--non-empty
+                              (alist-get 'name user))
                              user-id)))
               (puthash cache-key name slacko-render--user-cache)
               name)
@@ -192,10 +200,14 @@ Returns non-nil if the image was successfully inserted."
 
 (defun slacko-render--build-author-link (host author author-id)
   "Build an org link for AUTHOR with AUTHOR-ID on HOST.
-Returns a plain AUTHOR string if linking is not possible."
-  (if (and host author-id)
-      (format "[[slack://%s/team/%s][%s]]" host author-id author)
-    author))
+Returns a plain AUTHOR string if linking is not possible.
+Never produces an empty link description."
+  (let ((name (if (slacko-render--non-empty author)
+                  author
+                (or author-id "Unknown"))))
+    (if (and host author-id)
+        (format "[[slack://%s/team/%s][%s]]" host author-id name)
+      name)))
 
 (defun slacko-render--build-channel-link (host channel-name channel-id
                                                conversation-type)
@@ -279,7 +291,8 @@ HOST is used for building links."
                              (substring orig-ts -6))))))
                (orig-author-link
                 (slacko-render--build-author-link
-                 host (or orig-author "Unknown") orig-author-id))
+                 host (or (slacko-render--non-empty orig-author) "Unknown")
+                 orig-author-id))
                (orig-channel-link
                 (if (and host orig-channel-id)
                     (format "[[slack://%s/archives/%s][#%s]]"
@@ -313,7 +326,8 @@ MSG is a plist with these keys:
   :channel-id   - channel ID (optional)
   :conversation-type - \"Channel\", \"DM\", etc. (optional)
   :share-info   - shared message metadata plist (optional)"
-  (let* ((author (or (plist-get msg :author) "Unknown"))
+  (let* ((author (or (slacko-render--non-empty (plist-get msg :author))
+                     "Unknown"))
          (author-id (plist-get msg :author-id))
          (raw-text (plist-get msg :text))
          (ts (plist-get msg :ts))

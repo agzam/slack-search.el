@@ -140,6 +140,18 @@
            (result (slacko--parse-result match)))
       (expect (plist-get result :author) :to-equal "Unknown")))
 
+  (it "handles empty-string username gracefully"
+    (let* ((match `((username . "")
+                    (user . "U123")
+                    (text . "Message")
+                    (channel . ((id . "C456")
+                               (name . "general")
+                               (is_channel . t)))
+                    (ts . "1738226435.123456")
+                    (permalink . "https://workspace.slack.com/archives/C456/p1738226435123456")))
+           (result (slacko--parse-result match)))
+      (expect (plist-get result :author) :to-equal "Unknown")))
+
   (it "handles missing timestamp gracefully"
     (let* ((match `((username . "dave")
                     (user . "U222")
