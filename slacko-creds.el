@@ -28,6 +28,10 @@
 ;;; Code:
 
 (require 'auth-source)
+(require 'cl-lib)
+(require 'password-cache)
+(require 'url)
+(require 'url-vars)
 
 ;;; Customizable Variables
 
@@ -227,20 +231,51 @@ ENTRIES is a list of (host token cookie) triples."
           (delete-file tmp))))
     (message "Slack credentials saved to %s" slacko-creds-gpg-file)))
 
+(defvar slacko-creds--last-refresh-time nil
+  "Time of the last successful `slacko-creds-refresh', or nil.")
+
+(defvar slacko-creds--legacy-gpg-file
+  (expand-file-name ".slack-creds.gpg" user-emacs-directory)
+  "Legacy GPG file path from before the rename to slacko.")
+
 ;;; Main entry point
 
 (defun slacko-creds--clear-cache ()
-  "Clear auth-source cache for Slack credentials."
-  (when (and (boundp 'auth-source-cache)
-             (hash-table-p auth-source-cache))
+  "Clear auth-source caches for Slack credentials.
+Clears both the password-cache (`password-data') where auth-source
+stores search results, and `auth-source-netrc-cache' where parsed
+file contents are cached by mtime."
+  ;; 1. Clear search-result cache in password-data.
+  ;;    Keys are cons cells: (auth-source . (:host HOST :user KIND ...))
+  (when (and (boundp 'password-data)
+             (hash-table-p password-data))
     (let ((keys-to-remove '()))
       (maphash (lambda (k _v)
-                 (when (and (stringp k)
-                            (string-match-p "slack\\.com" k))
+                 (when (and (consp k)
+                            (eq (car k) 'auth-source)
+                            (let ((spec (cdr k)))
+                              (or (and (plist-member spec :host)
+                                       (let ((h (plist-get spec :host)))
+                                         (and (stringp h)
+                                              (string-match-p "slack\\.com" h))))
+                                  ;; Also match host-less searches (e.g. :user "token")
+                                  ;; that would have hit our GPG file
+                                  (and (not (plist-member spec :host))
+                                       (plist-member spec :user)
+                                       (member (plist-get spec :user)
+                                               '("token" "cookie"))))))
                    (push k keys-to-remove)))
-               auth-source-cache)
+               password-data)
       (dolist (k keys-to-remove)
-        (remhash k auth-source-cache)))))
+        (password-cache-remove k))))
+  ;; 2. Clear the netrc file-content cache so auth-source re-reads the GPG file
+  ;;    instead of relying on mtime comparison (which can miss same-second writes).
+  (when (boundp 'auth-source-netrc-cache)
+    (setq auth-source-netrc-cache
+          (cl-remove-if (lambda (entry)
+                          (or (string= (car entry) slacko-creds-gpg-file)
+                              (string= (car entry) slacko-creds--legacy-gpg-file)))
+                        auth-source-netrc-cache))))
 
 ;;;###autoload
 (defun slacko-creds-refresh ()
@@ -278,21 +313,15 @@ workspaces via auth.test, and saves to the GPG credentials file."
           (message "Done. %d workspace(s) updated." (length entries)))
       (error "No valid credentials found"))))
 
-(defvar slacko-creds--last-refresh-time nil
-  "Time of the last successful `slacko-creds-refresh', or nil.")
-
-(defvar slacko-creds--legacy-gpg-file
-  (expand-file-name ".slack-creds.gpg" user-emacs-directory)
-  "Legacy GPG file path from before the rename to slacko.")
-
 (defun slacko-creds--auth-source-get (host kind)
   "Look up credential for HOST and KIND from the GPG file via auth-source."
+  (slacko-creds--clear-cache)
   (let* ((auth-sources (append (list slacko-creds-gpg-file)
                                (when (and (not (string= slacko-creds-gpg-file
                                                         slacko-creds--legacy-gpg-file))
                                           (file-exists-p slacko-creds--legacy-gpg-file))
                                  (list slacko-creds--legacy-gpg-file))))
-         (auth-source-cache-expiry 0)
+         (auth-source-cache-expiry nil)
          (found (car (auth-source-search :host host :user kind :max 1))))
     (when found
       (let ((secret (plist-get found :secret)))

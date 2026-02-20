@@ -138,12 +138,13 @@ In thread buffers (or anywhere else), links open in the Slack app."
   "Return a list of all known Slack workspace hosts from the credentials file.
 If no hosts found and credentials haven't been refreshed recently,
 automatically runs `slacko-creds-refresh' and retries."
+  (slacko-creds--clear-cache)
   (let* ((auth-sources (append (list slacko-creds-gpg-file)
                                (when (and (not (string= slacko-creds-gpg-file
                                                         slacko-creds--legacy-gpg-file))
                                           (file-exists-p slacko-creds--legacy-gpg-file))
                                  (list slacko-creds--legacy-gpg-file))))
-         (auth-source-cache-expiry 0)
+         (auth-source-cache-expiry nil)
          (found (auth-source-search :user "token" :max 10))
          (hosts (delq nil (mapcar (lambda (entry) (plist-get entry :host)) found))))
     (or hosts
@@ -152,7 +153,9 @@ automatically runs `slacko-creds-refresh' and retries."
                   (> (float-time (time-subtract nil slacko-creds--last-refresh-time)) 60))
           (message "No workspaces found, refreshing credentials...")
           (slacko-creds-refresh)
-          (let ((found2 (auth-source-search :user "token" :max 10)))
+          (slacko-creds--clear-cache)
+          (let* ((auth-source-cache-expiry nil)
+                 (found2 (auth-source-search :user "token" :max 10)))
             (delq nil (mapcar (lambda (entry) (plist-get entry :host)) found2)))))))
 
 (defun slacko--prompt-host ()
