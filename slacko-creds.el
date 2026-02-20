@@ -315,7 +315,6 @@ workspaces via auth.test, and saves to the GPG credentials file."
 
 (defun slacko-creds--auth-source-get (host kind)
   "Look up credential for HOST and KIND from the GPG file via auth-source."
-  (slacko-creds--clear-cache)
   (let* ((auth-sources (append (list slacko-creds-gpg-file)
                                (when (and (not (string= slacko-creds-gpg-file
                                                         slacko-creds--legacy-gpg-file))
