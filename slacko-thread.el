@@ -28,6 +28,8 @@
 
 (declare-function slacko-open-in-slack "slacko" nil)
 
+(defvar slacko-emoji--buffer-host) ; forward declaration from slacko-emoji.el
+
 ;;; Customizable Variables
 
 (defgroup slacko-thread nil
@@ -159,6 +161,8 @@ CHANNEL-ID and URL are for context."
            (slacko-thread--normalize-message reply host channel-id 2))))
       (unless (eq major-mode 'slacko-thread-mode)
         (slacko-thread-mode))
+      ;; Set host for workspace emoji resolution
+      (setq slacko-emoji--buffer-host host)
       (goto-char (point-min)))
     (switch-to-buffer buf)))
 

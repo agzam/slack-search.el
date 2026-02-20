@@ -3,6 +3,18 @@
 
 All notable changes to this project will be documented in this file.
 
+* [1.2.0] - 2026-02-20
+** Added
+- Custom workspace emoji support: emojis uploaded to a Slack workspace (e.g. ~:laughcry:~) now render as inline images instead of raw shortcodes
+- ~emoji.list~ API integration to fetch all custom emojis per workspace, once per session
+- Disk cache for downloaded emoji images under ~slacko-emoji-cache-directory~, avoiding repeated downloads
+- Alias resolution for custom emojis that reference other emojis (recursive, depth-limited)
+- Buffer-local ~slacko-emoji--buffer-host~ wired through search and thread buffers so the emoji resolver knows which workspace to query
+
+** Fixed
+- Auth-source cache clearing: ~slacko-creds--clear-cache~ now properly clears ~password-data~ (cons-cell keys) and ~auth-source-netrc-cache~ instead of operating on a nonexistent ~auth-source-cache~ variable
+- Token authentication failure after Emacs restart: added ~(require 'url)~ and ~(require 'url-vars)~ to ~slacko-creds.el~ so that ~url-request-method~ and ~url-request-extra-headers~ are recognized as special (dynamic) variables under ~lexical-binding: t~
+
 * [1.1.0] - 2026-02-19
 ** Added
 - Interactive workspace selection with ~C-u slacko-search~ - when invoked with a prefix argument, prompts to choose from available Slack workspaces before searching

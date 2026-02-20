@@ -17,6 +17,10 @@
 ;; with their Unicode emoji equivalents (e.g. 😄), using the `emojify'
 ;; package's shortcode-to-unicode mapping.
 ;;
+;; Custom workspace emojis (uploaded images) are also supported.  These
+;; are fetched via Slack's `emoji.list' API, cached to disk, and rendered
+;; as inline images at emoji scale.
+;;
 ;; The underlying buffer text is never mutated - overlays with `display'
 ;; properties are used instead.  When the cursor is on an emoji overlay,
 ;; the original shortcode is revealed (org-appear style).
@@ -24,6 +28,8 @@
 ;;; Code:
 
 (require 'emojify)
+(require 'url)
+(require 'url-vars)
 
 (defgroup slacko-emoji nil
   "Emoji rendering for slacko buffers."
@@ -33,10 +39,111 @@
 (defvar-local slacko-emoji--revealed-overlays nil
   "List of overlays currently revealed (showing shortcode text).")
 
+(defvar-local slacko-emoji--buffer-host nil
+  "The Slack workspace host for the current buffer.
+Set by the rendering pipeline so the emoji resolver knows which
+workspace's custom emojis to use.")
+
 (defface slacko-emoji-count
   '((t :height 0.7 :inherit default))
   "Face for reaction count superscripts next to emoji."
   :group 'slacko-emoji)
+
+(defcustom slacko-emoji-cache-directory
+  (expand-file-name "slacko-emoji" (or (bound-and-true-p doom-cache-dir)
+                                       user-emacs-directory))
+  "Directory for caching downloaded workspace emoji images."
+  :type 'directory
+  :group 'slacko-emoji)
+
+;;; Workspace emoji cache
+
+(defvar slacko-emoji--workspace-emojis (make-hash-table :test 'equal)
+  "Cache of workspace custom emojis.
+Keys are HOST strings, values are hash tables mapping
+shortcode names (without colons) to either an image URL string
+or an \"alias:NAME\" string.")
+
+(defvar slacko-emoji--workspace-fetched (make-hash-table :test 'equal)
+  "Tracks which workspace hosts have had their emoji.list fetched this session.")
+
+(defun slacko-emoji--fetch-workspace-emojis (host)
+  "Fetch custom emoji list for HOST via the emoji.list API.
+Populates `slacko-emoji--workspace-emojis' for HOST.
+Only fetches once per session per host."
+  (unless (gethash host slacko-emoji--workspace-fetched)
+    (condition-case err
+        (when-let* ((resp (progn
+                            (require 'slacko-creds)
+                            (slacko-creds-api-request host "emoji.list" nil)))
+                    (_ (eq (alist-get 'ok resp) t))
+                    (emoji-alist (alist-get 'emoji resp)))
+          (let ((table (make-hash-table :test 'equal :size (length emoji-alist))))
+            (dolist (pair emoji-alist)
+              (puthash (symbol-name (car pair)) (cdr pair) table))
+            (puthash host table slacko-emoji--workspace-emojis))
+          (puthash host t slacko-emoji--workspace-fetched)
+          (message "Fetched %d custom emojis for %s"
+                   (hash-table-count (gethash host slacko-emoji--workspace-emojis))
+                   host))
+      (error
+       (puthash host t slacko-emoji--workspace-fetched)
+       (message "Failed to fetch workspace emojis for %s: %s" host err)))))
+
+(defun slacko-emoji--resolve-alias (name host &optional depth)
+  "Resolve emoji NAME for HOST, following aliases up to DEPTH levels.
+Returns the final URL string or nil."
+  (let ((depth (or depth 0))
+        (table (gethash host slacko-emoji--workspace-emojis)))
+    (when (and table (< depth 5))
+      (let ((value (gethash name table)))
+        (cond
+         ((null value) nil)
+         ((string-prefix-p "alias:" value)
+          (slacko-emoji--resolve-alias
+           (substring value 6) host (1+ depth)))
+         (t value))))))
+
+;;; Emoji image disk cache
+
+(defun slacko-emoji--cache-dir-for-host (host)
+  "Return the emoji cache directory for HOST, creating it if needed."
+  (let ((dir (expand-file-name host slacko-emoji-cache-directory)))
+    (unless (file-directory-p dir)
+      (make-directory dir t))
+    dir))
+
+(defun slacko-emoji--cached-image-path (host name)
+  "Return the disk cache path for emoji NAME on HOST."
+  (expand-file-name (concat name ".png")
+                    (slacko-emoji--cache-dir-for-host host)))
+
+(defun slacko-emoji--download-emoji-image (url host name)
+  "Download emoji image at URL for HOST/NAME, caching to disk.
+Returns the file path on success, nil on failure."
+  (let ((cache-path (slacko-emoji--cached-image-path host name)))
+    (if (file-exists-p cache-path)
+        cache-path
+      (condition-case nil
+          (let* ((url-request-method "GET")
+                 (url-request-extra-headers nil)
+                 (url-cookie-storage nil)
+                 (url-cookie-secure-storage nil)
+                 (buf (url-retrieve-synchronously url t nil 10)))
+            (when buf
+              (unwind-protect
+                  (with-current-buffer buf
+                    (goto-char (point-min))
+                    (when (re-search-forward "\r?\n\r?\n" nil t)
+                      (let ((data (buffer-substring-no-properties
+                                   (point) (point-max))))
+                        (when (> (length data) 0)
+                          (with-temp-file cache-path
+                            (set-buffer-multibyte nil)
+                            (insert data))
+                          cache-path))))
+                (kill-buffer buf))))
+        (error nil)))))
 
 ;;; Core lookup
 
@@ -45,13 +152,34 @@
   (when-let* ((entry (gethash shortcode emojify-emojis)))
     (gethash "unicode" entry)))
 
+(defun slacko-emoji--resolve (shortcode host)
+  "Resolve SHORTCODE to a display value for workspace HOST.
+Returns one of:
+  - A Unicode string (standard emoji)
+  - An Emacs image descriptor (custom workspace emoji)
+  - nil (unknown shortcode)"
+  ;; 1. Try standard Unicode via emojify
+  (or (slacko-emoji--shortcode-to-unicode shortcode)
+      ;; 2. Try workspace custom emoji
+      (when host
+        (let* ((name (replace-regexp-in-string "^:\\|:$" "" shortcode))
+               (url (slacko-emoji--resolve-alias name host)))
+          (when url
+            (when-let* ((path (slacko-emoji--download-emoji-image url host name)))
+              (condition-case nil
+                  (create-image path nil nil
+                                :ascent 'center
+                                :height (default-font-height))
+                (error nil))))))))
+
 ;;; Overlay management
 
-(defun slacko-emoji--make-overlay (beg end unicode shortcode)
-  "Create an emoji overlay from BEG to END showing UNICODE for SHORTCODE."
+(defun slacko-emoji--make-overlay (beg end display shortcode)
+  "Create an emoji overlay from BEG to END showing DISPLAY for SHORTCODE.
+DISPLAY can be a string (Unicode) or an image descriptor."
   (let ((ov (make-overlay beg end nil t nil)))
     (overlay-put ov 'category 'slacko-emoji)
-    (overlay-put ov 'display unicode)
+    (overlay-put ov 'display display)
     (overlay-put ov 'slacko-emoji-shortcode shortcode)
     (overlay-put ov 'evaporate t)
     (overlay-put ov 'help-echo shortcode)
@@ -73,7 +201,8 @@ BEG should include the leading space so it gets replaced by a thin space."
 (defun slacko-emoji--emojify-region (beg end)
   "Scan region from BEG to END for :shortcode: patterns and place emoji overlays.
 When a shortcode is followed by a space and a number (reaction count),
-the count is rendered as superscript."
+the count is rendered as superscript.
+Uses `slacko-emoji--buffer-host' for resolving workspace custom emojis."
   (when (hash-table-p emojify-emojis)
     (save-excursion
       (goto-char beg)
@@ -81,13 +210,13 @@ the count is rendered as superscript."
         (let* ((shortcode (match-string 1))
                (mb (match-beginning 1))
                (me (match-end 1))
-               (unicode (slacko-emoji--shortcode-to-unicode shortcode)))
-          (when (and unicode
+               (display (slacko-emoji--resolve shortcode slacko-emoji--buffer-host)))
+          (when (and display
                      ;; don't double-overlay
                      (not (seq-some (lambda (ov)
                                       (eq (overlay-get ov 'category) 'slacko-emoji))
                                     (overlays-at mb))))
-            (slacko-emoji--make-overlay mb me unicode shortcode)
+            (slacko-emoji--make-overlay mb me display shortcode)
             ;; superscript the count if present - overlay covers space+digits
             (when (match-beginning 2)
               (slacko-emoji--make-count-overlay
@@ -123,8 +252,8 @@ Only reveals emoji overlays, not count overlays."
   "Re-conceal overlay OV, restoring its emoji display."
   (when ov
     (when-let* ((shortcode (overlay-get ov 'slacko-emoji-shortcode))
-                (unicode (slacko-emoji--shortcode-to-unicode shortcode)))
-      (overlay-put ov 'display unicode))
+                (display (slacko-emoji--resolve shortcode slacko-emoji--buffer-host)))
+      (overlay-put ov 'display display))
     (setq slacko-emoji--revealed-overlays
           (delq ov slacko-emoji--revealed-overlays))))
 
@@ -168,9 +297,10 @@ Only reveals emoji overlays, not count overlays."
 (define-minor-mode slacko-emoji-mode
   "Toggle emoji overlay display in the current buffer.
 When enabled, Slack shortcodes like :smile: are overlaid with their
-Unicode emoji equivalents.  The original text is revealed when the
-cursor is on an emoji (org-appear style)."
-  :lighter " 😀"
+Unicode emoji equivalents.  Custom workspace emojis are rendered as
+inline images.  The original text is revealed when the cursor is on
+an emoji (org-appear style)."
+  :lighter " E"
   :group 'slacko-emoji
   (if slacko-emoji-mode
       (progn
@@ -179,6 +309,9 @@ cursor is on an emoji (org-appear style)."
                      (hash-table-p emojify-emojis)
                      (> (hash-table-count emojify-emojis) 0))
           (emojify-create-emojify-emojis))
+        ;; fetch workspace custom emojis if we know the host
+        (when slacko-emoji--buffer-host
+          (slacko-emoji--fetch-workspace-emojis slacko-emoji--buffer-host))
         (slacko-emoji--emojify-buffer)
         (add-hook 'post-command-hook #'slacko-emoji--post-command nil t)
         (add-hook 'after-change-functions #'slacko-emoji--after-change nil t))

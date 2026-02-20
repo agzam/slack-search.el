@@ -6,7 +6,7 @@
 ;; Maintainer: Ag Ibragimov <agzam.ibragimov@gmail.com>
 ;; Created: October 18, 2025
 ;; Modified: January 20, 2025
-;; Version: 1.0.0
+;; Version: 1.2.0
 ;; Keywords: tools
 ;; Homepage: https://github.com/agzam/slacko
 ;; Package-Requires: ((emacs "30.2"))
@@ -27,6 +27,8 @@
 (require 'slacko-render)
 (require 'slacko-creds)
 (require 'slacko-thread)
+
+(defvar slacko-emoji--buffer-host) ; forward declaration from slacko-emoji.el
 
 ;;; Customizable Variables
 
@@ -339,6 +341,9 @@ If APPEND is non-nil, append to existing results."
                   (set-window-start (get-buffer-window (current-buffer)) saved-window-start)))
             (unless (eq major-mode 'slacko-search-mode)
               (slacko-search-mode))
+            ;; Set host for workspace emoji resolution
+            (setq slacko-emoji--buffer-host
+                  (or slacko--current-host (slacko--default-host)))
             (goto-char (point-min)))
           
           ;; Load next page if available, but only after appending results
